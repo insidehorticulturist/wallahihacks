@@ -1,7 +1,7 @@
 # Eclipsis
 
-Created by: <span style="color: #ffb81eff;"><b>napoleonbomb</b></span>  
-Authored by: <span style="color: #ffb81eff;"><b>ray</b></span>
+Created by: <b>napoleonbomb</b>  
+Authored by: <b>ray</b>
 
 ## Installation
 
