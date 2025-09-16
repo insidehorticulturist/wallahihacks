@@ -1,8 +1,7 @@
 # Eclipsis
 
-Created by **napoleonbomb** • Authored by **Ray**
-
----
+Created by: <span style="color: #ffb81eff;"><b>napoleonbomb</b></span>  
+Authored by: <span style="color: #ffb81eff;"><b>ray</b></span>
 
 ## Installation
 
