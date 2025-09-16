@@ -1,0 +1,17 @@
+{
+  "aliases": {
+    "Util": "./Util",
+    "src": "./src",
+    "pkg": "./luau_packages"
+  },
+  "globals": [],
+  "languageMode": "nocheck",
+  "lint": {
+    "*": true,
+    "UnknownGlobal": false,
+    "ImportUnused": true,
+    "DeprecatedApi": false
+  },
+  "lintErrors": false,
+  "typeErrors": true
+}

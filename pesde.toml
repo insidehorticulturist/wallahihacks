@@ -1,0 +1,27 @@
+name = "raydjs/napoleonhub"
+version = "0.1.0"
+authors = ["raydjs"]
+license = "MIT"
+
+[target]
+environment = "roblox"
+
+[indices]
+default = "https://github.com/pesde-pkg/index"
+
+[wally_indices]
+default = "https://github.com/UpliftGames/wally-index"
+acme = "https://github.com/acme/wally-index"
+
+[scripts]
+roblox_sync_config_generator = ".pesde/scripts/roblox_sync_config_generator.luau"
+sourcemap_generator = ".pesde/scripts/sourcemap_generator.luau"
+
+[dev_dependencies]
+
+[dependencies]
+darklua = { name = "pesde/darklua", version = "^0.17.1", target = "lune" }
+selene = { name = "pesde/selene", version = "^0.29.0", target = "lune" }
+stylua = { name = "pesde/stylua", version = "^2.1.0", target = "lune" }
+# vide = { name = "centau/vide", version = "^0.3.1-test.1", target = "roblox" }
+# charm = { wally = "littensy/charm", version = "0.10.0", target = "luau" }

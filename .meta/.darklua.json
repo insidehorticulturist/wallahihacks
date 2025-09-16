@@ -1,0 +1,21 @@
+{
+    "generator": "retain_lines",
+    "bundle": {
+        "modules_identifier": "_DEVILS",
+        "excludes": [],
+        "require_mode": "path"
+    },
+    "rules": [
+        "convert_local_function_to_assign",
+        "remove_comments",
+        "remove_empty_do",
+        "remove_types",
+        "remove_unused_if_branch",
+        "remove_unused_variable",
+        "remove_interpolated_string",
+        "remove_compound_assignment",
+        "remove_if_expression",
+        "convert_luau_number",
+        "remove_floor_division"
+    ]
+}
