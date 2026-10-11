@@ -149,6 +149,10 @@ do
         "artyVisualSize",
         { Text = "Set Arty Size", Default = 0.1, Min = 0.05, Max = 5, Rounding = 2 }
     )
+    ArtillerySection:AddSlider(
+        "artyVisualTransparency",
+        { Text = "Set Arty Transparency", Default = 0, Min = 0, Max = 1, Rounding = 2 }
+    )
 
     local PlayerVisualSection = VisualTab:AddRightGroupbox("Players")
     PlayerVisualSection:AddCheckbox("playersVisual", { Text = "Players Visual" })

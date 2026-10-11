@@ -121,6 +121,16 @@ local function roundRotationTo15Degrees(cf)
     return CFrame.new(cf.Position) * CFrame.Angles(roundTo15(x), roundTo15(y), roundTo15(z))
 end
 
+-- parents a visual-only instance (adornments) to CoreGui so nothing is added to workspace,
+-- falling back to Terrain when CoreGui can't be written to
+local function parentToCoreGui(instance)
+    if not pcall(function()
+        instance.Parent = game:GetService("CoreGui")
+    end) then
+        instance.Parent = workspace.Terrain
+    end
+end
+
 -- one shared __namecall hook. every namecall in the game goes through it, so stacking a hook
 -- per feature costs fps; handlers are looked up by method name and get (old, self, ...)
 local namecallHandlers = {}
@@ -159,4 +169,5 @@ return {
     removeValue = removeValue,
     roundRotationTo15Degrees = roundRotationTo15Degrees,
     hookNamecall = hookNamecall,
+    parentToCoreGui = parentToCoreGui,
 }

@@ -7,6 +7,8 @@
 
 local Players = game:GetService("Players")
 
+local utility = require("../utility")
+
 local HEIGHT_LIMIT = 252
 local FADE_DISTANCE = 15
 local FADE_SPEED = 0.1
@@ -35,12 +37,7 @@ function main:start()
 	adornment.Transparency = 1
 	adornment.Visible = false
 
-	-- keep it out of workspace when we're allowed to
-	if not pcall(function()
-		adornment.Parent = game:GetService("CoreGui")
-	end) then
-		adornment.Parent = workspace.Terrain
-	end
+	utility.parentToCoreGui(adornment)
 
 	self.adornment = adornment
 end
