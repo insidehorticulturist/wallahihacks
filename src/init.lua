@@ -1,3 +1,5 @@
+
+
 loadstring([[
     function LPH_NO_VIRTUALIZE(f) return f end;
 	function LPH_JIT(f) return f end;
@@ -42,17 +44,17 @@ do
     UtilityMods:AddCheckbox("FallDamage", { Text = "No Fall Damage" })
     UtilityMods:AddCheckbox("InstantProduceWeapons", { Text = "Instant Produce Weapons" })
     UtilityMods:AddCheckbox("AutoInteractBore", { Text = "Auto Interact Bore" })
+    UtilityMods:AddCheckbox("ArtyGravity", {Text = "Arty Gravity (PRE ECO ONLY)"})
+    UtilityMods:AddSlider(
+        "GravitySlider",
+        { Text = "Set Arty Gravity", Default = 70, Min = 1, Max = 100, Tooltip = "Default: 70" }
+    )
 
     local PortafabMods = LocalTab:AddLeftGroupbox("Portafab")
     PortafabMods:AddCheckbox(
         "PORTAFAB/InfiniteRange",
         { Text = "Infinite Context Range", FormatDisplayValue = function() end }
     )
-
-    -- PortafabMods:AddCheckbox(
-    --     "PORTAFAB/InfiniteBuildRange",
-    --     { Text = "Infinite Build Range", FormatDisplayValue = function() end }
-    -- )
 
     PortafabMods:AddCheckbox("PORTAFAB/ExtendPipeHitbox", { Text = "Extend Pipe Hitbox" })
     PortafabMods:AddSlider(
@@ -111,37 +113,42 @@ do
     SilentAimSection:AddLabel("Locked on Color")
         :AddColorPicker("SilentAim/Color", { Default = Color3.fromRGB(255, 0, 0), Title = "locked on color" })
 
-
+    local BoreAimSection = AimbotTab:AddRightGroupbox("Bore Aimbot")
+    BoreAimSection:AddCheckbox("BoreAimbot", {Text = "Bore Aimbot", Tooltip = "When you aim a bore at another bore, it will automatically reaim towards the tilt assembly of the bore (top)"})
+    BoreAimSection:AddCheckbox("AimAtCenterOfOtherParts", {Text = "Aim at center", Tooltip = "Whether or not aiming a bore will reaim towards the center of a part."})
     local AutoStuff = AutoTab:AddLeftGroupbox("Auto")
     AutoStuff:AddCheckbox("AutoDCap", {Text = "Auto DCap"})
+    AutoStuff:AddSlider("AutoDCapDelay", { Text = "AutoDCapDelay", Default = 0.1, Min = 0, Max = 1, Rounding = 2 })
+    AutoStuff:AddDropdown("AutoDCapDropdown", {
+        Text = "Select Structures",
+        Multi = true,
+        Values = {
+            "Arc Turret",
+            "Turret",
+            "Fabricator",
+            "Automechanic",
+            "Boost Pad",
+            "Observer",
+            "Spatial Anchor",
+            "Spawn Point",
+            "Shield Generator",
+            "Point Defense",
+        }
+    })
     AutoStuff:AddCheckbox("AutoShield", {Text = "AutoShield", Tooltip = "Automatically turns on shields and anchors when placed"})
-    -- local SpamSection = AutoTab:AddLeftGroupbox("Spam")
-    -- -- SpamSection:AddDropdown(
-    -- --     "SelectSpam",
-    -- --     { Text = "Select Spam", Values = { "Laser Strikes", "Orbital Shields", "Cruise Missile" } }
-    -- -- )
-    -- -- SpamSection:AddCheckbox("ProduceSpam", { Text = "Produce Spam" })
-    -- -- SpamSection:AddCheckbox("AutoPickUp", { Text = "Auto Pick up Tool" })
-
-    -- local UpgradeRushSection = AutoTab:AddRightGroupbox("Auto Upgrade Rush")
-    -- UpgradeRushSection:AddCheckbox("AutoSortTools", { Text = "Auto Sort Tools" })
-    -- UpgradeRushSection:AddCheckbox("ProduceSetUpWalk", { Text = "Walk-to-produce" })
-    -- UpgradeRushSection:AddCheckbox("WalkToCollect", { Text = "Walk-to-collect" })
-    -- UpgradeRushSection:AddCheckbox("InstantUpgrade", { Text = "Instant Upgrade" })
-
-    -- local UtilitySection = AutoTab:AddLeftGroupbox("Utility")
+    AutoStuff:AddCheckbox("AutoBorePipe", {Text = "Auto four-way bores"})
 
     local ArtillerySection = VisualTab:AddLeftGroupbox("Artillery")
     ArtillerySection:AddCheckbox("artyVisual", { Text = "Arty Trajectory Visual" })
-    -- ArtillerySection:AddLabel("Artillery Color"):AddColorPicker("artyVisualColor", {
-    --     Default = Color3.fromRGB(60, 255, 0),
-    --     Title = "Artillery Color",
-    --     Transparency = 0,
-    -- })
-    -- ArtillerySection:AddSlider(
-    --     "artyVisualSize",
-    --     { Text = "Set Arty Size", Default = 0.1, Min = 0.05, Max = 5, Rounding = 2 }
-    -- )
+    ArtillerySection:AddLabel("Artillery Color"):AddColorPicker("artyVisualColor", {
+        Default = Color3.fromRGB(60, 255, 0),
+        Title = "Artillery Color",
+        Transparency = 0,
+    })
+    ArtillerySection:AddSlider(
+        "artyVisualSize",
+        { Text = "Set Arty Size", Default = 0.1, Min = 0.05, Max = 5, Rounding = 2 }
+    )
 
     local PlayerVisualSection = VisualTab:AddRightGroupbox("Players")
     PlayerVisualSection:AddCheckbox("playersVisual", { Text = "Players Visual" })
@@ -172,33 +179,83 @@ do
             "DamageIndicatorColor",
             { Title = "Damage Indicator Color", Default = Color3.fromRGB(255, 0, 0) }
         )
+    UtilityVisualSection:AddDivider()
     UtilityVisualSection:AddCheckbox("HeightLimitESP", { Text = "HeightLimit Esp" })
         :AddColorPicker(
             "HeighLimitColor",
             { Title = "Height ESP Color", Default = Color3.fromRGB(255, 0, 0) }
         )
-    
     UtilityVisualSection:AddSlider("HeightlimitSize", { Text = "Height Limit ESP Size", Default = 2, Min = 1, Max = 30 })
+    UtilityVisualSection:AddDivider()
 
+    UtilityVisualSection:AddCheckbox("BeaconSpotESP", { Text = "Beacon Spot ESP" })
+        :AddColorPicker(
+            "BeaconSpotColor",
+            { Title = "Beacon ESP Color", Default = Color3.fromRGB(255, 102, 0) }
+        )
+    UtilityVisualSection:AddDivider()
+    local beamColorToggle = UtilityVisualSection:AddCheckbox("ChangeBeamColors", {Text = "Change Distributor Beam Color"})
+    beamColorToggle:AddColorPicker(
+        "FirstBeamColor",
+        { Title = "BeamColorOne", Default = Color3.fromRGB(0, 255, 255) }
+    )
+    beamColorToggle:AddColorPicker(
+        "SecondBeamColor",
+        { Title = "BeamColortwo", Default = Color3.fromRGB(0, 255, 255) }
+    )
 
-    
+    local BoreVisualsSection = VisualTab:AddRightGroupbox("Bore Visuals")
+    BoreVisualsSection:AddCheckbox("NeonBores",{Text = "Neon Bores"})
+    BoreVisualsSection:AddCheckbox("BoreBeamColorChange", {Text = "Change Bore Beam Color"})
+        :AddColorPicker("BoreBeamColor", {Title = "BoreBeamColorDesu", Default = Color3.fromRGB(0, 255, 255)})
+    local previewBeamToggle = BoreVisualsSection:AddCheckbox("PreviewBeamColorChange",{Text = "Preview Beam Color Change"})
+    previewBeamToggle:AddColorPicker(
+        "PreviewBeamColorOne",
+        { Title = "Previewbeamcolorone", Default = Color3.fromRGB(0, 255, 255)}
+    )
+    previewBeamToggle:AddColorPicker(
+        "PreviewBeamColorTwo",
+        { Title = "Previewbeamcolortwo", Default = Color3.fromRGB(0, 255, 255)}
+    )
+    local boreFlareToggle = BoreVisualsSection:AddCheckbox("BoreFlareColors",{Text = "Bore Flare Colors"})
+    boreFlareToggle:AddColorPicker(
+        "BoreFlareColorOne",
+        { Title = "Boreflarecolorone", Default = Color3.fromRGB(0, 255, 255)}
+    )
+    boreFlareToggle:AddColorPicker(
+        "BoreFlareColorTwo",
+        { Title = "Boreflarecolortwo", Default = Color3.fromRGB(0, 255, 255)}
+    )
 
     do
+        local artygrav = require("@core/artygrav").new()
         local container = require("@Util/container")
+        local beamcolor = require("@core/beamcolors").new()
+        local main = require("@core/main").new()
+        local spawnpoint = require("@core/spawnpoints").new()
+        local bore = require("@core/autoaimbore").new()
+        local pipeextender = require("@core/pipeextender").new()
+        local silentaim = require("@core/silentaim").new()
+        local damageindicator = require("@core/damageindicator").new()
+        local visuals = require("@core/visuals").new()
+        local artillery = require("@core/artillery").new()
+        local autodcap = require("@core/autodcap").new()
+        local autoshield = require("@core/autoshield")
+        local heightlimit = require("@core/heighlimit").new()
+        local beaconspotesp = require("@core/beaconspotesp").new()
+        local boreaimbot = require("@core/boreaimbot").new()
+        local borecustomize = require("@core/borecustom").new()
+        local autoborepipe = require("@core/autoborepipe").new()
+        local nofall = require("@core/nofall")
 
-        local main = require("./core/main").new()
-        local spawnpoint = require("./core/spawnpoints").new()
-        local bore = require("./core/autoaimbore").new()
-        local pipeextender = require("./core/pipeextender").new()
-        local silentaim = require("./core/silentaim").new()
-        local damageindicator = require("./core/damageindicator").new()
-        local visuals = require("./core/visuals").new()
-        local artillery = require("./core/artillery").new()
-        local autodcap = require("./core/autodcap").new()
-        local autoshield = require("./core/autoshield")
-        local heightlimit = require("./core/heighlimit")
         for name, value in
             {
+                artygrav = artygrav,
+                autoborepipe = autoborepipe,
+                borecustomize = borecustomize,
+                boreaimbot = boreaimbot,
+                beamcolor = beamcolor,
+                beaconspotesp = beaconspotesp,
                 main = main,
                 bore = bore,
                 artillery = artillery,
@@ -213,7 +270,12 @@ do
         do
             container[name] = value
         end
-
+        artygrav:start()
+        autoborepipe:start()
+        borecustomize:start()
+        boreaimbot:start()
+        beamcolor:start()
+        beaconspotesp:start()
         heightlimit:start()
         main:start()
         bore:start()
@@ -222,22 +284,48 @@ do
         silentaim:start()
         damageindicator:start()
 
+        -- SetText rebuilds the rich text label, so only call it when the spawn changes
+        local shownSpawn = {}
+
         RunService.RenderStepped:Connect(LPH_NO_VIRTUALIZE(function()
             artillery:update()
             spawnpoint:update()
             visuals:update()
             silentaim:update()
-            selectedSpawnLabel:SetText(
-                if rawget(container, "selectedSpawn")
-                    then `Selecting <font color='#42d1f5'><b>S{container.selectedSpawn}</b></font>`
-                    else `<font color='#f54242'><b>NO SPAWN</b></font>`
-            )
+            heightlimit:update()
+
+            if container.selectedSpawn ~= shownSpawn then
+                shownSpawn = container.selectedSpawn
+                selectedSpawnLabel:SetText(
+                    if shownSpawn
+                        then `Selecting <font color='#42d1f5'><b>S{shownSpawn}</b></font>`
+                        else `<font color='#f54242'><b>NO SPAWN</b></font>`
+                )
+            end
         end))
         workspace:WaitForChild("Structures").ChildAdded:Connect(function(child)
-            autodcap:start(child)
-            autoshield(child)
+            -- both yield, so run them side by side instead of making autoshield wait on autodcap
+            task.spawn(autodcap.start, autodcap, child)
+            task.spawn(autoshield, child)
         end)
-        workspace:WaitForChild("Structures").ChildRemoved:Connect(function(child)
+
+        Toggles.FallDamage:OnChanged(function()
+            nofall.SetFallDamage(not Toggles.FallDamage.Value)
+        end)
+
+        -- the fall damage script comes back with every character, so turn it off again
+        game.Players.LocalPlayer.CharacterAdded:Connect(function(character)
+            if not Toggles.FallDamage.Value then
+                return
+            end
+
+            character:WaitForChild("FallDamageScript", 10)
+            for _ = 1, 10 do
+                task.wait(0.5)
+                if not Toggles.FallDamage.Value or nofall.SetFallDamage(false) then
+                    return
+                end
+            end
         end)
     end
 end

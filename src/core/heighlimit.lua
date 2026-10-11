@@ -1,73 +1,117 @@
--- FloorPartModule.lua
+-- by amedote
+-- todo: instead of using 252 as heightlimit grab it from the server config
+-- todo: fade distance and other customizability options ( they are alr implemented just needs to be fixed in the gui file )
+
+-- the disc is a handle adornment, not a part. adornments aren't BaseParts, so raycasts,
+-- Mouse.Target and the game's placement system can't hit them, and nothing is added to workspace
+
+local Players = game:GetService("Players")
+
+local HEIGHT_LIMIT = 252
+local FADE_DISTANCE = 15
+local FADE_SPEED = 0.1
+local DISC_ROTATION = CFrame.Angles(math.rad(90), 0, 0) -- cylinder adornments run along Z, so lay it flat
+
 local main = {}
 main.__index = main
 
-function main.new(options)
+function main.new()
 	local self = setmetatable({}, main)
-	self.player = game.Players.LocalPlayer
-	self.part = nil
+	self.player = Players.LocalPlayer
+	self.adornment = nil
 	self.hrp = nil
+	self.transparency = 1
+	self.size = nil
+	self.color = nil
 	return self
 end
 
 function main:start()
-	-- Reattach every time the player respawns
-	game.Players.LocalPlayer.CharacterAdded:Connect(function(character)
-		self:setup(character)
-	end)
+	local adornment = Instance.new("CylinderHandleAdornment")
+	adornment.Name = "\255"
+	adornment.Adornee = workspace.Terrain -- terrain sits at the origin, so CFrame below is world space
+	adornment.Height = 0.1
+	adornment.AlwaysOnTop = false
+	adornment.Transparency = 1
+	adornment.Visible = false
 
-	-- If the character already exists, start immediately
-	if game.Players.LocalPlayer.Character then
-		self:setup(game.Players.LocalPlayer.Character)
+	-- keep it out of workspace when we're allowed to
+	if not pcall(function()
+		adornment.Parent = game:GetService("CoreGui")
+	end) then
+		adornment.Parent = workspace.Terrain
 	end
+
+	self.adornment = adornment
 end
 
-function main:setup(character)
-	local hrp = character:WaitForChild("HumanoidRootPart")
+function main:_getRootPart()
+	local character = self.player.Character
+	if not character then
+		return nil
+	end
 
-	-- Create the circular (cylindrical) part
-	local part = Instance.new("Part")
-	part.Shape = Enum.PartType.Cylinder
-	part.Parent = workspace
-	part.Color = Color3.fromRGB(255, 0, 0)
-	part.CanCollide = false
-	part.Anchored = true
-	part.Transparency = 1 -- start invisible
+	local hrp = self.hrp
+	if not (hrp and hrp.Parent == character) then
+		hrp = character:FindFirstChild("HumanoidRootPart")
+		self.hrp = hrp
+	end
 
-	self.part = part
-	self.hrp = hrp
+	return hrp
+end
 
-	task.spawn(function()
-		while character and character.Parent do
-			self:update()
-			task.wait()
-		end
-	end)
+function main:_hide()
+	self.transparency = 1
+	if self.adornment.Visible then
+		self.adornment.Visible = false
+	end
 end
 
 function main:update()
-	if not Toggles.HeightLimitESP then 
-		self.part.Transparency = 1
-		return end
-	if not self.part or not self.hrp then return end
-	-- Update size from options
-	if Options.HeightlimitSize.Value then
-		self.part.Size = Vector3.new(0.1,Options.HeightlimitSize.Value,Options.HeightlimitSize.Value)
+	local adornment = self.adornment
+	if not adornment then return end
+
+	if not Toggles.HeightLimitESP.Value then
+		self:_hide()
+		return
 	end
 
-	-- Update position while keeping it rotated flat
-	local pos = self.hrp.Position
-	self.part.CFrame = CFrame.new(pos.X, 252, pos.Z) * CFrame.Angles(0, 0, math.rad(90))
+	local hrp = self:_getRootPart()
+	if not hrp then
+		self:_hide()
+		return
+	end
 
-	-- Update fade distance from options
-	local fadeDistance = 15
-	local fadeSpeed =  0.1
+	local pos = hrp.Position
+	local distance = math.abs(HEIGHT_LIMIT - pos.Y)
+	local targetTransparency = if distance < FADE_DISTANCE then distance / FADE_DISTANCE else 1
 
-	local distance = (self.hrp.Position - self.part.Position).Magnitude
-	local targetTransparency = distance < fadeDistance and math.clamp(distance / fadeDistance, 0, 1) or 1
-	self.part.Color = Options.HeighLimitColor.Value
-	-- Smooth transparency transition
-	self.part.Transparency = self.part.Transparency + (targetTransparency - self.part.Transparency) * fadeSpeed
+	local transparency = self.transparency + (targetTransparency - self.transparency) * FADE_SPEED
+	self.transparency = transparency
+
+	-- fully faded out, skip the property writes until we get close again
+	if targetTransparency == 1 and transparency > 0.99 then
+		if adornment.Visible then
+			adornment.Visible = false
+		end
+		return
+	end
+
+	local size = Options.HeightlimitSize.Value
+	if size and size ~= self.size then
+		self.size = size
+		adornment.Radius = size / 2
+	end
+
+	local color = Options.HeighLimitColor.Value
+	if color ~= self.color then
+		self.color = color
+		adornment.Color3 = color
+	end
+
+	adornment.CFrame = CFrame.new(pos.X, HEIGHT_LIMIT, pos.Z) * DISC_ROTATION
+	adornment.Transparency = transparency
+	adornment.Visible = true
 end
 
 return main

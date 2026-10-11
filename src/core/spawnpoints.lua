@@ -1,3 +1,5 @@
+-- by nqjf
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
@@ -22,38 +24,40 @@ function main:start()
     local oldSelect = SpawnPointController._select
 
     function SpawnPointController._select(...)
-        local hasIndex = select(2, ...)
+        local index = select(2, ...)
 
-        if hasIndex then
-            this.currentSpawn = select(2, ...)
+        if index then
+            this.currentSpawn = index
         end
 
         return oldSelect(...)
     end
-    container.instantTPCall:Connect(function()
+
+    -- spawns at the selected pad, or a random one if none is selected
+    local function requestSpawn(isRespawn)
         if this.currentSpawn == nil then
-            local randomSpawn = SpawnPointController.padList[math.random(1, #SpawnPointController.padList)]
+            local padList = SpawnPointController.padList
+            if #padList == 0 then
+                return
+            end
+
+            local randomSpawn = padList[math.random(1, #padList)]
 
             if randomSpawn then
-                SpawnRequest:InvokeServer(randomSpawn.Index, false)
+                SpawnRequest:InvokeServer(randomSpawn.Index, isRespawn)
             end
             return
         end
 
-        SpawnRequest:InvokeServer(this.currentSpawn, false)
+        SpawnRequest:InvokeServer(this.currentSpawn, isRespawn)
+    end
+
+    container.instantTPCall:Connect(function()
+        requestSpawn(false)
     end)
 
     container.instantRespawnCall:Connect(function()
-        if this.currentSpawn == nil then
-            local randomSpawn = SpawnPointController.padList[math.random(1, #SpawnPointController.padList)]
-
-            if randomSpawn then
-                SpawnRequest:InvokeServer(randomSpawn.Index, true)
-            end
-            return
-        end
-
-        SpawnRequest:InvokeServer(this.currentSpawn, true)
+        requestSpawn(true)
     end)
 
     Options.SelectedPadList:OnChanged(function(value)
@@ -64,7 +68,7 @@ function main:start()
         local withIndex = {}
 
         for _, v in pads do
-            local tot = v.TeleportAvailabilityLevel or v.AvailabilityLevel
+            local tot = v.TeleportAvailabilityLevel or v.AvailabilityLevel or 0
 
             if tot >= 1 then
                 table.insert(withIndex, v.Index)

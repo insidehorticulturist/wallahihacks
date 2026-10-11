@@ -1,5 +1,8 @@
+-- by nqjf and amedote
+
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local container = require("@Util/container")
 local utility = require("../utility")
@@ -17,6 +20,15 @@ end
 local inaccuracyMagnitude = 5
 local inaccuracySpeed = 2
 
+-- tools that keep their normal targeting
+local IGNORED_TOOLS = {
+    ["Laser Strike"] = true,
+    ["Orbital Shield"] = true,
+    ["Cruise Missile"] = true,
+    ["Rocket Launcher"] = true,
+    ["Laser Drill"] = true,
+}
+
 local function getRandomBodyPart()
     local roll = math.random()
     if roll <= 0.6 then
@@ -28,15 +40,24 @@ end
 
 function main:start()
     local oldMouseInfo = GunClient.GetMouseInfo
+    local LocalPlayer = Players.LocalPlayer
 
     function GunClient.GetMouseInfo(...)
         self.lastClocked = os.clock()
-        local getCharacter =
-            utility.GetClosestPlayer(Options["SilentAim/DrawFovValue"].Value, Toggles["SilentAim/TeamCheck"].Value)
+
+        local character = LocalPlayer.Character
+        local tool = character and character:FindFirstChildOfClass("Tool")
+        local toolName = tool and tool.Name or ""
+        if IGNORED_TOOLS[toolName] then
+            return oldMouseInfo(...)
+        end
 
         local result = { oldMouseInfo(...) }
 
         if Toggles.SilentAim.Value then
+            local getCharacter =
+                utility.GetClosestPlayer(Options["SilentAim/DrawFovValue"].Value, Toggles["SilentAim/TeamCheck"].Value)
+
             container.lockedOn = getCharacter
             if getCharacter then
                 local bodyPart = getCharacter:FindFirstChild(
@@ -76,11 +97,11 @@ function main:update()
         if self.circle == nil then
             self.circle = utility.circle({ Radius = Options["SilentAim/DrawFovValue"].Value })
             self.circle.Visible = true
-        else
-            self.circle.Radius = Options["SilentAim/DrawFovValue"].Value
-            self.circle.Color = Options["SilentAim/DrawFovColor"].Value
-            self.circle.Position = UserInputService.GetMouseLocation(UserInputService)
         end
+
+        self.circle.Radius = Options["SilentAim/DrawFovValue"].Value
+        self.circle.Color = Options["SilentAim/DrawFovColor"].Value
+        self.circle.Position = UserInputService.GetMouseLocation(UserInputService)
     else
         if self.circle ~= nil then
             self.circle.Visible = false

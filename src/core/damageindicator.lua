@@ -1,3 +1,6 @@
+-- by nqjf
+-- rewritten for 77ware by amedote
+
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
@@ -11,13 +14,19 @@ function damageindicator.new()
 end
 
 local function applyDamageVisual(character)
-    local humanoid = character:WaitForChild("Humanoid")
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        humanoid = character:WaitForChild("Humanoid", 5) 
+        if not humanoid then return end
+    end
+
     local lastHealth = humanoid.Health
 
     humanoid:GetPropertyChangedSignal("Health"):Connect(function()
         local currentHealth = humanoid.Health
-
-        if currentHealth < lastHealth and container.lockedOn == nil then
+        -- skip the silent aim target, its esp already shows the locked-on color
+        if currentHealth < lastHealth and Toggles.DamageIndicator.Value and container.lockedOn ~= character then
             local foundHighlight = character:FindFirstChild("xaaaaaa")
             if foundHighlight then
                 foundHighlight:Destroy()
@@ -35,23 +44,28 @@ local function applyDamageVisual(character)
             }):Play()
 
             task.delay(1, function()
-                highlight:Destroy()
+                if highlight and highlight.Parent then
+                    highlight:Destroy()
+                end
             end)
         end
-
         lastHealth = currentHealth
     end)
 end
 
+local function watchPlayer(player)
+    player.CharacterAdded:Connect(applyDamageVisual)
+end
+
 function damageindicator:start()
     for _, player in Players:GetPlayers() do
-        applyDamageVisual(player.Character)
-        player.CharacterAdded:Connect(applyDamageVisual)
+        if player.Character then
+            applyDamageVisual(player.Character)
+        end
+        watchPlayer(player)
     end
 
-    Players.PlayerAdded:Connect(function(player)
-        player.CharacterAdded:Connect(applyDamageVisual)
-    end)
+    Players.PlayerAdded:Connect(watchPlayer)
 end
 
 return damageindicator

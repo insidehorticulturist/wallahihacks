@@ -1,3 +1,6 @@
+-- by amedote
+-- usage: e to power, click to aim
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")

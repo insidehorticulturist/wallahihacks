@@ -16,27 +16,11 @@ function main:start()
         local result = oldGetRootModel(...)
 
         if result and result:IsA("Model") and Toggles["PORTAFAB/ExtendPipeHitbox"].Value then
-            for _, pipe in result:GetChildren() do
-                local pipeFemale = pipe:FindFirstChild("PipeFemale")
+            local size = Options["PORTAFAB/ExtendPipeHitboxSize"].Value
 
-                if pipeFemale then
-                    for _, pip in pipeFemale:GetChildren() do
-                        if pip.Name:find("Flange") then
-                            pip.Size = Vector3.new(
-                                Options["PORTAFAB/ExtendPipeHitboxSize"].Value,
-                                0.5,
-                                Options["PORTAFAB/ExtendPipeHitboxSize"].Value
-                            )
-                        end
-                    end
-                end
-
-                if pipe:IsA("BasePart") and pipe.Name:find("Flange") then
-                    pipe.Size = Vector3.new(
-                        Options["PORTAFAB/ExtendPipeHitboxSize"].Value,
-                        0.5,
-                        Options["PORTAFAB/ExtendPipeHitboxSize"].Value
-                    )
+            for _, descendant in ipairs(result:GetDescendants()) do
+                if descendant:IsA("BasePart") and descendant.Name:lower():find("flange") then
+                    descendant.Size = Vector3.new(size, 0.5, size)
                 end
             end
         end
