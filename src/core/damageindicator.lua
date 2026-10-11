@@ -18,7 +18,7 @@ local function applyDamageVisual(character)
         local currentHealth = humanoid.Health
 
         if currentHealth < lastHealth and container.lockedOn == nil then
-            local foundHighlight = character:FindFirstChild("nigfhafhdasoifhdaspfowhaejfopwafjwepoifpenis")
+            local foundHighlight = character:FindFirstChild("xaaaaaa")
             if foundHighlight then
                 foundHighlight:Destroy()
             end
@@ -26,7 +26,7 @@ local function applyDamageVisual(character)
             local highlight = Instance.new("Highlight")
             highlight.FillColor = Options.DamageIndicatorColor.Value
             highlight.Parent = character
-            highlight.Name = "nigfhafhdasoifhdaspfowhaejfopwafjwepoifpenis"
+            highlight.Name = "xaaaaaa"
             highlight.FillTransparency = 0.05
 
             TweenService:Create(highlight, TweenInfo.new(1), {

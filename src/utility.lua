@@ -130,6 +130,14 @@ local function isAliveModel(character)
     return false
 end
 
+local function ActivateButton(button)
+	game:GetService('ReplicatedStorage')
+		:WaitForChild('Shared')
+		:WaitForChild('Remotes')
+		:WaitForChild('ContextButton')
+		:FireServer(button)
+end
+
 return {
     get = get,
     GetClosestPlayer = GetClosestPlayer,
@@ -138,4 +146,5 @@ return {
     square = square,
     line = line,
     isAliveModel = isAliveModel,
+    ActivateButton = ActivateButton
 }

@@ -1,13 +1,12 @@
 {
     "generator": "retain_lines",
     "bundle": {
-        "modules_identifier": "_DEVILS",
+        "modules_identifier": "mini",
         "excludes": [],
         "require_mode": "path"
     },
     "rules": [
         "convert_local_function_to_assign",
-        "remove_comments",
         "remove_empty_do",
         "remove_types",
         "remove_unused_if_branch",

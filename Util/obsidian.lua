@@ -13,8 +13,8 @@ Library.ForceCheckbox = false
 Library.ShowToggleFrameInKeybinds = true
 
 local Window = Library:CreateWindow({
-	Title = "mini.hub",
-	Footer = `https://discord.gg/xuEAHusEKh | {game.PlaceVersion}`,
+	Title = "xd",
+	Footer = `not by amedote | {game.PlaceVersion}`,
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 })
