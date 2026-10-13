@@ -12973,6 +12973,7 @@ end function dote.Y()local v=dote.cache.Y if not v then v={c=__modImpl()}dote.ca
 
 
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 
 local utility = dote.n()
 local theme = dote.b()
@@ -12985,6 +12986,8 @@ local TOOL_NAME = "Rocket Launcher"
 -- a TargetingUpdated older than this means the launcher stopped aiming (put away, dead)
 local TARGET_MAX_AGE = 0.5
 local MARKER_RADIUS = 1.2
+-- where the info card sits from the cursor, out of the way of what you're aiming at
+local CARD_OFFSET = Vector2.new(28, -26)
 
 local colors = theme.colors
 local fonts = theme.fonts
@@ -13092,23 +13095,24 @@ function main:_buildIndicator()
     utility.parentToCoreGui(highlight)
     self.highlight = highlight
 
-    -- the card floats over the impact point: what's there, its health, distance and flight time
-    -- adorned to terrain (at the origin), so its world offset is a world position
-    local card = create("BillboardGui", {
+    -- the card sits beside the cursor: what's there, its health, distance and flight time. the gui ignores
+    -- the inset so mouse locations line up with it
+    local card = create("ScreenGui", {
         Name = "\255",
-        Size = UDim2.fromOffset(170, 52),
-        Adornee = workspace.Terrain,
-        AlwaysOnTop = true,
-        LightInfluence = 0,
+        IgnoreGuiInset = true,
         ResetOnSpawn = false,
+        DisplayOrder = 10,
         Enabled = false,
+        Parent = theme.guiParent(),
     })
-    local panel = create("Frame", {
-        Size = UDim2.fromScale(1, 1),
+    -- a canvas group so the transparency slider fades the whole card at once
+    local panel = create("CanvasGroup", {
+        Size = UDim2.fromOffset(170, 52),
         BackgroundColor3 = colors.background,
         BackgroundTransparency = 0.2,
         Parent = card,
     }, { corner(6), theme.stroke(colors.strokeBright) })
+    self.cardPanel = panel
     self.cardName = text({
         Position = UDim2.fromOffset(8, 4),
         Size = UDim2.new(1, -16, 0, 14),
@@ -13146,7 +13150,6 @@ function main:_buildIndicator()
         TextColor3 = colors.muted,
         Parent = panel,
     })
-    utility.parentToCoreGui(card)
     self.card = card
 end
 
@@ -13223,6 +13226,14 @@ function main:update()
         self.highlight.OutlineColor = color
         self.highlight.FillColor = color
     end
+    local transparency = Options["RocketSilentAim/IndicatorTransparency"].Value
+    if transparency ~= self.shownTransparency then
+        self.shownTransparency = transparency
+        marker.Transparency = transparency
+        self.highlight.OutlineTransparency = transparency
+        -- the fill stays faint even when the slider is at 0, or it would hide what it's on
+        self.highlight.FillTransparency = math.max(transparency, 0.8)
+    end
     marker.Visible = true
 
     local model, kind = targetModel(target.part)
@@ -13234,7 +13245,9 @@ function main:update()
     end
 
     local card = self.card
-    card.StudsOffsetWorldSpace = impact + Vector3.new(0, 3, 0)
+    local mouse = UserInputService:GetMouseLocation()
+    self.cardPanel.Position = UDim2.fromOffset(mouse.X + CARD_OFFSET.X, mouse.Y + CARD_OFFSET.Y)
+    self.cardPanel.GroupTransparency = Options["RocketSilentAim/CardTransparency"].Value
     card.Enabled = true
 
     local distance = (impact - self.barrel).Magnitude
@@ -13497,6 +13510,22 @@ end,
     }):AddColorPicker("RocketSilentAim/IndicatorColor", {
         Title = "Impact Point Color",
         Default = Color3.fromRGB(255, 120, 40),
+    })
+    RocketAimSection:AddSlider("RocketSilentAim/IndicatorTransparency", {
+        Text = "Marker Transparency",
+        Default = 0.15,
+        Min = 0,
+        Max = 1,
+        Rounding = 2,
+        Tooltip = "The dot where the rocket will hit and the outline on what's there",
+    })
+    RocketAimSection:AddSlider("RocketSilentAim/CardTransparency", {
+        Text = "Info Card Transparency",
+        Default = 0.2,
+        Min = 0,
+        Max = 1,
+        Rounding = 2,
+        Tooltip = "The card next to the cursor with the target's health, distance and flight time",
     })
 
     local BoreAimSection = CombatTab:AddRightGroupbox("Bore Aimbot")
