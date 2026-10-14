@@ -579,6 +579,10 @@ local LocalPlayer = Players.LocalPlayer
 local DEFAULT_SIZE = Vector2.new(980, 620)
 local MIN_SIZE = Vector2.new(780, 480)
 local SIDEBAR_WIDTH = 190
+-- the tab list sits between the brand and the player card
+local NAV_TOP = 80
+local NAV_BOTTOM = 68
+local TAB_HEIGHT = 30
 local HEADER_HEIGHT = 66
 local COLUMN_GAP = 16
 local PAGE_PADDING = 24
@@ -920,25 +924,23 @@ paintWordmark()
     }), "TextColor3", "accent")
     self:_makeDraggable(brand)
 
-    text({
-        Position = UDim2.fromOffset(22, 84),
-        Size = UDim2.new(1, -30, 0, 12),
-        Text = "MODULES",
-        Font = fonts.mono,
-        TextSize = 10,
-        TextColor3 = colors.faint,
-        Parent = sidebar,
-    })
-
-    self.nav = create("Frame", {
-        Position = UDim2.fromOffset(0, 102),
-        Size = UDim2.new(1, 0, 1, -170),
+    -- the tab list scrolls once there are more tabs than fit; AddCategory puts headings between them
+    self.nav = create("ScrollingFrame", {
+        Position = UDim2.fromOffset(0, NAV_TOP),
+        Size = UDim2.new(1, 0, 1, -NAV_TOP - NAV_BOTTOM),
         BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = colors.strokeBright,
+        CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
         Parent = sidebar,
     }, {
-        theme.padding(10, 10, 0, 0),
+        theme.padding(10, 10, 0, 6),
         create("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }),
     })
+    self.navOrder = 0
 
     -- who's playing
     local card = create("Frame", {
@@ -1435,7 +1437,7 @@ function Library:AddSidebarButton(info)
     end
     self.sidebarButtons =self.sidebarButtons+ 1
     -- the tab list gives up the room the buttons take
-    self.nav.Size = UDim2.new(1, 0, 1, -170 - self.sidebarButtons * (SIDEBAR_BUTTON_HEIGHT + 6))
+    self.nav.Size = UDim2.new(1, 0, 1, -NAV_TOP - NAV_BOTTOM - self.sidebarButtons * (SIDEBAR_BUTTON_HEIGHT + 6))
 
     local tint = colors[info.Color or "danger"]
     local button = create("TextButton", {
@@ -1484,6 +1486,26 @@ end
 
 -- tabs
 
+function Library:_nextNavOrder()
+    self.navOrder =self.navOrder+ 1
+    return self.navOrder
+end
+
+-- a small heading in the tab list; the tabs added after it sit under it
+function Library:AddCategory(name)
+    local heading = text({
+        Size = UDim2.new(1, 0, 0, 22),
+        Text = string.upper(name),
+        Font = fonts.mono,
+        TextSize = 10,
+        TextColor3 = colors.faint,
+        TextYAlignment = Enum.TextYAlignment.Bottom,
+        LayoutOrder = self:_nextNavOrder(),
+        Parent = self.nav,
+    })
+    theme.padding(12, 0, 0, 3).Parent = heading
+end
+
 function Library:AddTab(name)
     local index = #self.tabs + 1
     local tab = setmetatable({
@@ -1494,12 +1516,12 @@ function Library:AddTab(name)
     }, Tab)
 
     local button = create("TextButton", {
-        Size = UDim2.new(1, 0, 0, 34),
+        Size = UDim2.new(1, 0, 0, TAB_HEIGHT),
         BackgroundColor3 = colors.raised,
         BackgroundTransparency = 1,
         AutoButtonColor = false,
         Text = "",
-        LayoutOrder = index,
+        LayoutOrder = self:_nextNavOrder(),
         Parent = self.nav,
     }, { corner(6) })
     tab.button = button
@@ -1680,6 +1702,7 @@ function Groupbox.new(window, column, name)
         Parent = column,
     }, { corner(8), stroke() })
     theme.surface(frame, 0.7)
+    self.frame = frame
 
     create("Frame", {
         Position = UDim2.fromOffset(16, 15),
@@ -1716,6 +1739,56 @@ function Groupbox.new(window, column, name)
         create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
     })
 
+    return self
+end
+
+-- a box inside the groupbox for options that only matter while something is on (a feature's sliders
+-- while its switch is on). it takes the same Add* calls as a groupbox; SetupDependencies decides when it
+-- shows. indented with a line down its left, so it reads as belonging to the row above
+function Groupbox:AddDependencyBox()
+    local holder = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        LayoutOrder = self:_next(),
+        Parent = self.content,
+    })
+    create("Frame", {
+        Size = UDim2.new(0, 2, 1, 0),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 0.6,
+        BorderSizePixel = 0,
+        Parent = holder,
+    }, { corner(1), theme.accentGradient(90) })
+    local content = create("Frame", {
+        Position = UDim2.fromOffset(12, 0),
+        Size = UDim2.new(1, -12, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Parent = holder,
+    }, {
+        create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
+    })
+    return setmetatable({ window = self.window, order = 0, content = content, frame = holder }, Groupbox)
+end
+
+-- shows this groupbox (or dependency box) only while every { setting, value } pair matches; with
+-- any = true, while at least one does. settings are Toggles or single pick dropdowns
+function Groupbox:SetupDependencies(dependencies, any)
+    local frame = self.frame
+local check=function()        
+local matched = 0
+        for _, dependency in dependencies do
+            if dependency[1].Value == dependency[2] then
+                matched =matched+ 1
+            end
+        end
+        frame.Visible = (any and{(matched > 0 )}or{(matched == #dependencies
+)})[1]end    
+for _, dependency in dependencies do
+        dependency[1]:OnChanged(check)
+    end
+    check()
     return self
 end
 
@@ -1970,6 +2043,8 @@ function Groupbox:AddDropdown(index, info)
         Position = UDim2.fromOffset(12, 0),
         Size = UDim2.new(1, -40, 1, 0),
         TextColor3 = colors.text,
+        -- RichText = true lets FormatDisplayValue color parts of a value
+        RichText = info.RichText == true,
         Parent = box,
     })
     theme.chevron({
@@ -2549,6 +2624,7 @@ local entries = table.clone(values)
             Position = UDim2.fromOffset(20, 0),
             Size = UDim2.new(1, -24, 1, 0),
             Text = dropdown._display(value),
+            RichText = dropdown._info.RichText == true,
             ZIndex = 54,
             Parent = button,
         })
@@ -2585,7 +2661,7 @@ local entries = table.clone(values)
         search:GetPropertyChangedSignal("Text"):Connect(function()
             local query = string.lower(search.Text)
             for _, row in rows do
-                row.button.Visible = query == "" or string.find(string.lower(row.label.Text), query, 1, true) ~= nil
+                row.button.Visible = query == "" or string.find(string.lower(row.label.ContentText), query, 1, true) ~= nil
             end
         end)
         search:CaptureFocus()
@@ -2751,7 +2827,7 @@ dragArea(square, dragSquare)
     end)
 end
 
--- configs: named sets of settings in eclx/configs/<userId>/<name>.json, made and loaded from Settings.
+-- configs: named sets of settings in eclx/configs/<name>.json, made and loaded from Settings.
 -- nothing saves on its own; one config can be picked to load when the script starts (autoload.txt)
 
 local AUTOLOAD_FILE = "autoload.txt"
@@ -2767,29 +2843,91 @@ end local canUseFiles=function()
 
 return writefile and readfile and isfile and isfolder and makefolder and listfiles
 end
+-- one folder for every account and every game, so a config made anywhere shows everywhere
 
 function Library:_configFolder()
-    return string.format('%s/%s', tostring(CONFIG_FOLDER), tostring(LocalPlayer.UserId))
+    return CONFIG_FOLDER
 end
 
 function Library:_configPath(name)
     return string.format('%s/%s.json', tostring(self:_configFolder()), tostring(name))
 end
 
+-- older versions kept a folder per account (eclx/configs/<userId>/), and before that one file per account
+-- (eclx/configs/<userId>.json). their configs are copied into the shared folder once; a name that's taken
+-- by a different config gets a number added. the old files are left where they were
+local MIGRATED_FILE = "migrated.txt"
+
+function Library:_migrateConfigs()
+    local marker = string.format('%s/%s', tostring(CONFIG_FOLDER), tostring(MIGRATED_FILE))    
+if isfile(marker) then
+        return
+    end
+local copyIn=function(
+name, contents)        
+local target, number = name, 1
+        while isfile(self:_configPath(target)) do
+            if readfile(self:_configPath(target)) == contents then
+                return target
+            end
+            number =number+ 1
+            target = string.format('%s %s', tostring(name), tostring(number))        
+end
+        writefile(self:_configPath(target), contents)
+        return target
+end
+    -- this account's folder goes first, so its autoload wins
+    
+local folders = {}
+    for _, path in listfiles(CONFIG_FOLDER) do
+        local userId = string.match(path, "[/\\](%d+)$")
+        if userId and isfolder(path) then
+            table.insert(folders, tonumber(userId) == LocalPlayer.UserId and 1 or#folders + 1, path)
+        end
+    end
+
+    local autoload = nil
+    for _, folder in folders do
+        local renamed = {}
+        for _, path in listfiles(folder) do
+            local name = string.match(path, "([^/\\]+)%.json$")
+            if name then
+                renamed[name] = copyIn(name, readfile(path))
+            end
+        end
+        local autoloadPath = string.format('%s/%s', tostring(folder), tostring(AUTOLOAD_FILE))        
+if not autoload and isfile(autoloadPath) then
+            autoload = renamed[cleanName(readfile(autoloadPath))]
+        end
+    end
+
+    for _, path in listfiles(CONFIG_FOLDER) do
+        -- these sit in the shared folder now, so they're removed once copied or they'd list as configs
+        if string.match(path, "[/\\]%d+%.json$") and isfile(path) then
+            copyIn("previous", readfile(path))
+            if delfile then
+                delfile(path)
+            end
+        end
+    end
+
+    local autoloadPath = string.format('%s/%s', tostring(CONFIG_FOLDER), tostring(AUTOLOAD_FILE))    
+if autoload and not isfile(autoloadPath) then
+        writefile(autoloadPath, autoload)
+    end
+    writefile(marker, "configs from the per account folders were copied here")
+end
+
 function Library:_ensureConfigFolder()
-    for _, folder in { "eclx", CONFIG_FOLDER, self:_configFolder() } do
+    for _, folder in { "eclx", CONFIG_FOLDER } do
         if not isfolder(folder) then
             makefolder(folder)
         end
     end
 
-    -- the single file older versions saved to on every change becomes a config named "previous"
-    local legacy = string.format('%s/%s.json', tostring(CONFIG_FOLDER), tostring(LocalPlayer.UserId))    
-if isfile(legacy) and not isfile(self:_configPath("previous")) then
-        writefile(self:_configPath("previous"), readfile(legacy))
-        if delfile then
-            delfile(legacy)
-        end
+    local ok, err = pcall(self._migrateConfigs, self)
+    if not ok then
+        warn("[eclx] couldn't copy the old configs over:", err)
     end
 end
 
@@ -2941,6 +3079,8 @@ function Library:GetAutoload()
     end
     local path = string.format('%s/%s', tostring(self:_configFolder()), tostring(AUTOLOAD_FILE))    
 local ok, name = pcall(function()
+        -- this runs first on start, so old per account configs are copied in before it looks
+        self:_ensureConfigFolder()
         return (isfile(path) and{(cleanName(readfile(path)) )}or{nil
 })[1]    end)
     return (ok and name ~= "" and{name }or{nil
@@ -5338,7 +5478,1553 @@ return {
     DEFAULTS = DEFAULTS,
     new = new,
 }
-end function dote.i()local v=dote.cache.i if not v then v={c=__modImpl()}dote.cache.i=v end return v.c end end do local __modImpl=function()-- who's playing and what they're doing right now: team, health, iridium, the tool in hand, laser strikes /
+end function dote.i()local v=dote.cache.i if not v then v={c=__modImpl()}dote.cache.i=v end return v.c end end do local __modImpl=function()
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+
+-- wall check: a ray from origin to the part that only stops on something solid (CanCollide), passing
+-- through both characters, the camera and anything see-through to the game's own collisions
+local visibilityParams = RaycastParams.new()
+visibilityParams.FilterType = Enum.RaycastFilterType.Exclude
+visibilityParams.RespectCanCollide = true
+
+local VISIBILITY_PARTS = { "Head", "HumanoidRootPart" }
+local visiblePart=function(
+
+
+origin, character, preferred)    
+visibilityParams.FilterDescendantsInstances = { Players.LocalPlayer.Character, character, workspace.CurrentCamera }
+
+    local names = VISIBILITY_PARTS
+    if preferred and preferred ~= VISIBILITY_PARTS[1] then
+        names = { preferred, VISIBILITY_PARTS[1], VISIBILITY_PARTS[2] }
+    end
+
+    for _, name in names do
+        local part = character:FindFirstChild(name)
+        if part and part:IsA("BasePart") and not workspace:Raycast(origin, part.Position - origin, visibilityParams) then
+            return part
+        end
+    end
+    return nil
+end local shotOrigin=function()    
+
+
+
+local character = Players.LocalPlayer.Character
+    local head = character and character:FindFirstChild("Head")
+    return (head and{(head.Position )}or{(workspace.CurrentCamera.CFrame.Position
+)})[1]end local GetClosestPlayer=function(
+
+
+fovRadius, teamCheck, wallCheck)    
+local mousePos = UserInputService:GetMouseLocation()
+    local fovSq = (fovRadius or 300) ^ 2
+    local camera = workspace.CurrentCamera
+    local LocalPlayer = Players.LocalPlayer
+    local origin = wallCheck and shotOrigin()
+
+    local closestPlayer = nil
+    local closestDistSq = fovSq
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then
+            continue
+        end
+
+        if teamCheck and player.Team == LocalPlayer.Team then
+            continue
+        end
+
+        local character = player.Character
+        if not character then
+            continue
+        end
+
+        local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+        if not (humanoid and humanoid.Health > 0) then
+            continue
+        end
+
+        local rootPart = character.PrimaryPart or character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then
+            continue
+        end
+
+        -- viewport space, like GetMouseLocation (screen space leaves out the top bar, so it'd be off by it)
+        local screenPos, onScreen = camera:WorldToViewportPoint(rootPart.Position)
+        if not onScreen then
+            continue
+        end
+
+        local dx, dy = screenPos.X - mousePos.X, screenPos.Y - mousePos.Y
+        local distSq = dx * dx + dy * dy
+
+        -- the ray is the expensive part, so it only runs for a player that would win
+        if distSq < closestDistSq and not (origin and not visiblePart(origin, character)) then
+            closestDistSq = distSq
+            closestPlayer = player
+        end
+    end
+
+    if closestPlayer then
+        return closestPlayer.Character, math.sqrt(closestDistSq)
+    end
+    return nil, nil
+end local circle=function(
+
+info)    
+local drawing = Drawing.new("Circle")
+    drawing.Position = info.Position or Vector2.new(150, 150)
+    drawing.Radius = info.Radius or 20
+    drawing.Filled = false
+    drawing.Thickness = info.Thickness or 2
+
+    return drawing
+end local label=function(
+
+info)    
+local text = Drawing.new("Text")
+    text.Text = info.Text or "Hello, World!"
+    text.Position = info.Position or Vector2.new(150, 150)
+    text.Color = info.Color or Color3.new(0.968627, 0.972549, 0.968627)
+    text.Size = 18
+    text.Font = Drawing.Fonts.Monospace
+    text.Visible = true
+
+    return text
+end local line=function(
+
+info)    
+local drawing = Drawing.new("Line")
+    drawing.Visible = info.Visible or false
+    drawing.Transparency = info.Transparency or 1
+    drawing.Color = info.Color or Color3.fromRGB(0, 0, 0)
+
+    drawing.Thickness = info.Thickness or 1
+    return drawing
+end local isAliveModel=function(
+
+character)    
+if character and character.IsDescendantOf(character, workspace) and character.PrimaryPart ~= nil then
+        return character
+    end
+
+    return false
+end local ActivateButton=function(
+
+button)	
+game:GetService('ReplicatedStorage')
+		:WaitForChild('Shared')
+		:WaitForChild('Remotes')
+		:WaitForChild('ContextButton')
+		:FireServer(button)
+end local removeValue=function(
+
+
+list, value)    
+for i, v in ipairs(list) do
+        if v == value then
+            table.remove(list, i)
+            return
+        end
+    end
+end local roundRotationTo15Degrees=function(
+
+
+cf)    
+local x, y, z = cf:ToEulerAnglesXYZ()
+local roundTo15=function(angle)        
+return math.rad(math.round(math.deg(angle) / 15) * 15)
+end    
+return CFrame.new(cf.Position) * CFrame.Angles(roundTo15(x), roundTo15(y), roundTo15(z))
+end local parentToCoreGui=function(
+
+
+
+instance)    
+if not pcall(function()
+        instance.Parent = game:GetService("CoreGui")
+    end) then
+        instance.Parent = workspace.Terrain
+    end
+end local imageContent=function(
+
+
+
+value)    
+value = tostring(value or "")
+    if value:find("^rbxasset") or value:find("^rbxthumb") or value:find("^http") then
+        return value
+    end
+    local id = value:match("%d+")
+    return (id and{(string.format('rbxthumb://type=Asset&id=%s&w=420&h=420', tostring(id)))}or{nil
+})[1]end
+-- gun shots: every hitscan shot drops a streak into workspace.Effects, a Part named "Part" with a
+-- BlockMesh. it's added at a template size and only then stretched from the muzzle to the hit, on the
+-- same frame for some guns (SMG, minigun) and the next for others (pistol, rifles, the portafab's build
+-- beam), so it's read on its first resize, once it spans the shot
+
+local SHOOTER_RANGE = 14 -- the muzzle end is this close to the shooter's root
+local SHOT_TIMEOUT = 0.5
+local isShotStreak=function(
+child)    
+return child.Name == "Part" and child:IsA("BasePart") and child:FindFirstChildOfClass("BlockMesh") ~= nil
+end local onShotPlaced=function(
+
+
+
+streak, callback)    
+local fired, resized = false, false
+    local connection
+local fire=function()        
+if fired then
+            return
+        end
+        fired = true
+        connection:Disconnect()
+        -- never stretched: it's still the template, sitting nowhere near the shot
+        if not (resized and streak.Parent) then
+            return
+        end
+        local cframe, length = streak.CFrame, streak.Size.Z
+        local back = cframe.Position - cframe.LookVector * length / 2
+        local front = cframe.Position + cframe.LookVector * length / 2
+
+        local shooter, best = nil, SHOOTER_RANGE
+        for _, player in Players:GetPlayers() do
+            local character = player.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            local distance = root and (root.Position - back).Magnitude
+            if distance and distance < best then
+                shooter, best = player, distance
+            end
+        end
+        local tool = shooter and shooter.Character:FindFirstChildOfClass("Tool")
+        callback(back, front, shooter, tool and tool.Name)
+end    -- the CFrame goes on right after the size, in the same go
+    
+connection = streak:GetPropertyChangedSignal("Size"):Connect(function()
+        resized = true
+        task.defer(fire)
+    end)
+    task.delay(SHOT_TIMEOUT, fire)
+end
+-- one shared __namecall hook. every namecall in the game goes through it, so stacking a hook
+-- per feature costs fps; handlers are looked up by method name and get (old, self, ...)
+-- a method can have several handlers: the newest runs first and its `old` continues down the chain
+
+local namecallHandlers = {}
+local oldNamecall
+local callOriginal=function(
+self, ...)    
+return oldNamecall(self, ...)
+end local installNamecall=function()    
+
+
+
+
+if oldNamecall then
+        return
+    end
+
+    oldNamecall = hookmetamethod(
+        game,
+        "__namecall",
+        LPH_JIT_MAX(function(self, ...)
+            local entry = namecallHandlers[getnamecallmethod()]
+
+            if entry and not checkcaller() then
+                return entry[1](entry[2], self, ...)
+            end
+
+            return oldNamecall(self, ...)
+        end)
+    )
+end local hookNamecall=function(
+
+
+
+method, handler, toggleNames)    -- a handler that makes its own method calls (a Raycast, a GetAttribute) changes the namecall method,
+    -- and passing the call on would then run that method on the original object instead; put it back first
+    
+local nextHandler = function(self, ...)
+        if setnamecallmethod then
+            setnamecallmethod(method)
+        end
+        return callOriginal(self, ...)
+    end
+
+    local previous = namecallHandlers[method]
+    if previous then
+        local previousHandler, previousNext = previous[1], previous[2]
+        nextHandler = function(self, ...)
+            return previousHandler(previousNext, self, ...)
+        end
+    end
+
+    namecallHandlers[method] = { handler, nextHandler }
+
+    if not toggleNames then
+        installNamecall()
+        return
+    end
+
+    for _, name in toggleNames do
+        local toggle = Toggles[name]
+        if toggle.Value then
+            installNamecall()
+        end
+        toggle:OnChanged(function(enabled)
+            if enabled then
+                installNamecall()
+            end
+        end)
+    end
+end local claimHook=function(
+
+
+
+
+feature, target)    
+local env = (getgenv and{(getgenv() )}or{_G
+})[1]    local registry = env.EclXHooks
+    if not registry then
+        registry = {}
+        env.EclXHooks = registry
+    end
+
+    local claimed = registry[feature]
+    if not claimed then
+        claimed = setmetatable({}, { __mode = "k" })
+        registry[feature] = claimed
+    end
+
+    if claimed[target] then
+        return false
+    end
+    claimed[target] = true
+    return true
+end
+
+return {
+    claimHook = claimHook,
+    visiblePart = visiblePart,
+    imageContent = imageContent,
+    isShotStreak = isShotStreak,
+    onShotPlaced = onShotPlaced,
+    shotOrigin = shotOrigin,
+    GetClosestPlayer = GetClosestPlayer,
+    circle = circle,
+    label = label,
+    line = line,
+    isAliveModel = isAliveModel,
+    ActivateButton = ActivateButton,
+    removeValue = removeValue,
+    roundRotationTo15Degrees = roundRotationTo15Degrees,
+    hookNamecall = hookNamecall,
+    parentToCoreGui = parentToCoreGui,
+}
+end function dote.j()local v=dote.cache.j if not v then v={c=__modImpl()}dote.cache.j=v end return v.c end end do local __modImpl=function()-- one place that works out who hurt and killed whom, for the kill feed, the announcer, damage numbers
+-- and hit sounds. nothing here reaches the server; it reads what replicates to us:
+--   our hits     the game's hitmarker (GunClient.OnHitMarkerRequested runs when one of our shots lands),
+--                and the hit point of each of our shots (the tracer streak in workspace.Effects, once
+--                it's placed from muzzle to hit; see utility.onShotPlaced)
+--   damage       every other player's health dropping. it's ours when it drops within HIT_WINDOW of our
+--                hitmarker, or within HIT_RANGE of where one of our shots just landed
+--   kills        every death. the killer is the match tracker's answer when it has one, otherwise us if we
+--                damaged them within KILL_CREDIT before they died; the weapon is what the killer held
+-- usage: local combat = Combat.new(tracker); combat:start()
+--        combat.damaged:Connect(function(player, amount, position, mine) end)
+--        combat.died:Connect(function(killer, victim, weapon) end)   killer / weapon can be nil
+--        combat.hit:Connect(function() end)                          one of our shots landed
+
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local signal = dote.a()
+local utility = dote.j()
+
+local HIT_WINDOW = 0.4
+local HIT_RANGE = 10
+local KILL_CREDIT = 2
+-- the tracker settles a death a moment after it (laser strike kills wait on their use check)
+local DEATH_SETTLE = 0.5
+-- one hit per this long, so the hitmarker and the health drop of the same shot count once
+local HIT_DEBOUNCE = 0.05
+
+local LocalPlayer = Players.LocalPlayer
+
+local Combat = {}
+Combat.__index = Combat
+
+function Combat.new(tracker)
+    return setmetatable({
+        tracker = tracker,
+        damaged = signal.new(),
+        died = signal.new(),
+        hit = signal.new(),
+        lastHitmarker = -math.huge,
+        lastHit = -math.huge,
+        shots = {}, -- { position, at } of our recent shots' hit points
+        lastDamage = {}, -- player -> when we last hurt them
+        trackerKills = {}, -- victim userId -> { killer, weapon, at }
+    }, Combat)
+end
+
+function Combat:_hit()
+    local now = os.clock()
+    if now - self.lastHit >= HIT_DEBOUNCE then
+        self.lastHit = now
+        self.hit:Fire()
+    end
+end
+
+function Combat:_nearOurShot(position, now)
+    for _, shot in self.shots do
+        if now - shot.at <= HIT_WINDOW and (shot.position - position).Magnitude <= HIT_RANGE then
+            return true
+        end
+    end
+    return false
+end
+local heldTool=function(
+player)    
+local character = player and player.Character
+    local tool = character and character:FindFirstChildOfClass("Tool")
+    return tool and tool.Name
+end
+
+function Combat:_watchCharacter(player, character)
+    local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 10)
+    if not humanoid then
+        return
+    end
+
+    local lastHealth = humanoid.Health
+    humanoid.HealthChanged:Connect(function(health)
+        local amount = lastHealth - health
+        lastHealth = health
+        if amount <= 0 or player == LocalPlayer then
+            return
+        end
+
+        local root = character:FindFirstChild("HumanoidRootPart")
+        local head = character:FindFirstChild("Head")
+        local position = (head or root) and (head or root).Position
+        if not position then
+            return
+        end
+
+        local now = os.clock()
+        local mine = now - self.lastHitmarker <= HIT_WINDOW or self:_nearOurShot(position, now)
+        if mine then
+            self.lastDamage[player] = now
+            self:_hit()
+        end
+        self.damaged:Fire(player, amount, position, mine)
+    end)
+
+    humanoid.Died:Connect(function()
+        local diedAt = os.clock()
+        local ourDamage = self.lastDamage[player]
+        local weaponNow = heldTool(LocalPlayer)
+        task.delay(DEATH_SETTLE, function()
+            local tracked = self.trackerKills[player.UserId]
+            local killer, weapon
+            if tracked and math.abs(tracked.at - diedAt) <= DEATH_SETTLE + 0.5 then
+                killer, weapon = tracked.killer, tracked.weapon
+                self.trackerKills[player.UserId] = nil
+            elseif player ~= LocalPlayer and ourDamage and diedAt - ourDamage <= KILL_CREDIT then
+                killer, weapon = LocalPlayer, weaponNow
+            end
+            if killer == player then
+                killer = nil
+            end
+            self.died:Fire(killer, player, weapon)
+        end)
+    end)
+end
+
+function Combat:_watchPlayer(player)
+    if player.Character then
+        task.spawn(self._watchCharacter, self, player, player.Character)
+    end
+    player.CharacterAdded:Connect(function(character)
+        self:_watchCharacter(player, character)
+    end)
+end
+
+function Combat:start()
+    -- the hitmarker: GunClient is the class every gun inherits from, so wrapping it covers all of them
+    local GunClient = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Class"):WaitForChild("GunClient"))
+    if typeof(GunClient.OnHitMarkerRequested) == "function" and utility.claimHook("combat", GunClient) then
+        local oldHitmarker = GunClient.OnHitMarkerRequested
+        GunClient.OnHitMarkerRequested = function(...)
+            self.lastHitmarker = os.clock()
+            self:_hit()
+            return oldHitmarker(...)
+        end
+    end
+
+    -- our shots' hit points, from the tracer streaks
+    local effects = workspace:WaitForChild("Effects")
+    effects.ChildAdded:Connect(function(streak)
+        if not utility.isShotStreak(streak) then
+            return
+        end
+        utility.onShotPlaced(streak, function(_, front, shooter, toolName)
+            -- the portafab's build beam is a streak too, but it doesn't hurt anyone
+            if shooter ~= LocalPlayer or toolName == "Portafab" or toolName == "Prototyper" then
+                return
+            end
+            local shots = self.shots
+            table.insert(shots, { position = front, at = os.clock() })
+            if #shots > 12 then
+                table.remove(shots, 1)
+            end
+        end)
+    end)
+
+    -- the tracker's kills say who did it when it knows (leaderstats, killer tags, laser strikes)
+    if self.tracker then
+        self.tracker:onEvent(function(event)
+            if event.kind ~= "kill" then
+                return
+            end
+            local killer = event.killer and event.killer.userId and Players:GetPlayerByUserId(event.killer.userId)
+            local victim = event.victim and event.victim.userId
+            if killer and victim then
+                self.trackerKills[victim] = { killer = killer, weapon = event.weapon or heldTool(killer), at = os.clock() }
+            end
+        end)
+    end
+
+    for _, player in Players:GetPlayers() do
+        self:_watchPlayer(player)
+    end
+    Players.PlayerAdded:Connect(function(player)
+        self:_watchPlayer(player)
+    end)
+    Players.PlayerRemoving:Connect(function(player)
+        self.lastDamage[player] = nil
+    end)
+end
+
+return Combat
+end function dote.k()local v=dote.cache.k if not v then v={c=__modImpl()}dote.cache.k=v end return v.c end end do local __modImpl=function()-- sounds for the fun stuff: one-shot sounds (built-in presets or any audio id) and text to speech.
+-- everything plays on our client only, through SoundService, so position and the game's own sound
+-- groups don't change it.
+-- usage: sounds.play(sounds.resolve("Ping", customId), volume, speed); sounds.speak("Double kill", "2", 1)
+
+
+local SoundService = game:GetService("SoundService")
+
+-- the client's own sound files; every one of these loaded in game (some others in the folder don't)
+local PRESETS = {
+    Ping = "rbxasset://sounds/electronicpingshort.wav",
+    Hit = "rbxasset://sounds/hit.wav",
+    Snap = "rbxasset://sounds/snap.mp3",
+    Click = "rbxasset://sounds/clickfast.wav",
+    Switch = "rbxasset://sounds/switch.wav",
+    Bass = "rbxasset://sounds/bass.mp3",
+    Thud = "rbxasset://sounds/collide.wav",
+    Oof = "rbxasset://sounds/uuhhh.mp3",
+    Glass = "rbxasset://sounds/glassbreak.wav",
+    Slash = "rbxasset://sounds/swordslash.wav",
+}
+local PRESET_NAMES = { "Ping", "Hit", "Snap", "Click", "Switch", "Bass", "Thud", "Oof", "Glass", "Slash", "Custom" }
+
+local cache = {} -- sound id -> Sound, reused
+local resolve=function(
+
+preset, custom)    
+if preset == "Custom" then
+        local id = tostring(custom or ""):match("%d+")
+        return id and string.format('rbxassetid://%s', tostring(id))or nil
+    end
+    return PRESETS[preset]
+end local play=function(
+
+soundId, volume, speed)    
+if not soundId or volume <= 0 then
+        return
+    end
+    local sound = cache[soundId]
+    if not sound then
+        sound = Instance.new("Sound")
+        sound.SoundId = soundId
+        sound.Parent = SoundService
+        cache[soundId] = sound
+    end
+    sound.Volume = volume
+    sound.PlaybackSpeed = speed or 1
+    -- a copy per play, so quick hits overlap instead of cutting each other off
+    local copy = sound:Clone()
+    copy.Parent = SoundService
+    copy.Ended:Once(function()
+        copy:Destroy()
+    end)
+    copy:Play()
+    task.delay(6, function()
+        if copy.Parent then
+            copy:Destroy()
+        end
+    end)
+end local speak=function(
+
+
+text, voice, volume, speed)    
+if volume <= 0 then
+        return
+    end
+    task.spawn(function()
+        local speech = Instance.new("AudioTextToSpeech")
+        speech.Text = text
+        speech.VoiceId = voice or "1"
+        speech.Volume = volume
+        speech.Speed = speed or 1
+        local output = Instance.new("AudioDeviceOutput")
+        local wire = Instance.new("Wire")
+        speech.Parent = SoundService
+        output.Parent = speech
+        wire.Parent = speech
+        wire.SourceInstance = speech
+        wire.TargetInstance = output
+
+        local ok = pcall(speech.LoadAsync, speech)
+        if ok and speech.TimeLength > 0 then
+            speech:Play()
+            task.wait(speech.TimeLength / math.max(speed or 1, 0.1) + 0.5)
+        end
+        speech:Destroy()
+    end)
+end
+
+return {
+    PRESET_NAMES = PRESET_NAMES,
+    resolve = resolve,
+    play = play,
+    speak = speak,
+}
+end function dote.l()local v=dote.cache.l if not v then v={c=__modImpl()}dote.cache.l=v end return v.c end end do local __modImpl=function()-- holds instance properties at our own values and puts the game's back when let go.
+-- if the game changes a held property (a map's lighting loading in, a structure recoloring itself), its
+-- new value is what gets restored later and ours goes straight back on, so nothing flickers.
+-- usage: local held = override.new(); held:set(Lighting, "ClockTime", 14); held:release(Lighting, "ClockTime")
+
+
+local override = {}
+override.__index = override
+
+function override.new()
+    return setmetatable({
+        entries = {}, -- instance -> { props = { property -> prop }, ancestry = connection }
+    }, override)
+end
+local write=function(
+
+instance, property, prop)    
+prop.writing = true
+    instance[property] = prop.value
+    prop.writing = false
+    prop.applied = instance[property]
+end
+-- drops an instance without writing to it, for when it has left the game
+
+function override:_forget(instance)
+    local entry = self.entries[instance]
+    if not entry then
+        return
+    end
+    self.entries[instance] = nil
+    entry.ancestry:Disconnect()
+    for _, prop in entry.props do
+        prop.connection:Disconnect()
+    end
+end
+
+function override:set(instance, property, value)
+    local entry = self.entries[instance]
+    if not entry then
+        entry = { props = {} }
+        -- streamed out or destroyed: nothing left to restore
+        entry.ancestry = instance.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then
+                self:_forget(instance)
+            end
+        end)
+        self.entries[instance] = entry
+    end
+
+    local prop = entry.props[property]
+    if not prop then
+        prop = { original = instance[property] }
+        prop.connection = instance:GetPropertyChangedSignal(property):Connect(function()
+            -- our own write: with immediate signals it lands here mid-write, with deferred ones later,
+            -- compared with what the property read back as (the engine stores some values at lower
+            -- precision than the number we gave it)
+            local current = instance[property]
+            if prop.writing or current == prop.applied then
+                return
+            end
+            prop.original = current
+            write(instance, property, prop)
+        end)
+        entry.props[property] = prop
+    end
+
+    prop.value = value
+    write(instance, property, prop)
+end
+
+-- puts the game's value back
+function override:release(instance, property)
+    local entry = self.entries[instance]
+    local prop = entry and entry.props[property]
+    if not prop then
+        return
+    end
+
+    prop.connection:Disconnect()
+    entry.props[property] = nil
+    instance[property] = prop.original
+
+    if next(entry.props) == nil then
+        entry.ancestry:Disconnect()
+        self.entries[instance] = nil
+    end
+end
+
+-- the game's value: what release would put back, or the current value if it isn't held
+function override:original(instance, property)
+    local entry = self.entries[instance]
+    local prop = entry and entry.props[property]
+    if prop then
+        return prop.original
+    end
+    return instance[property]
+end
+
+function override:isHeld(instance, property)
+    local entry = self.entries[instance]
+    return entry ~= nil and entry.props[property] ~= nil
+end
+
+function override:releaseAll()
+    for instance, entry in self.entries do
+        for property in entry.props do
+            self:release(instance, property)
+        end
+    end
+end
+
+return override
+end function dote.m()local v=dote.cache.m if not v then v={c=__modImpl()}dote.cache.m=v end return v.c end end do local __modImpl=function()-- weapon skins, on your own guns and on your screen only. the game's own marketplace skins are a picture
+-- (a Decal named ToolTexture) on the gun's Handle, which carries the gun's mesh (a SpecialMesh), so a skin
+-- here does the same: the picture goes on that decal and on the mesh's texture.
+--   skin          any of the game's own skins, or any decal / image id, for every gun or per gun (a gun's
+--                 own pick wins). the game's skins are read from ReplicatedStorage.Shared.Items (lobby
+--                 only: one model per item, with ItemType "Skin", ItemName, ItemCost and its ToolTexture
+--                 decal); match servers use the copy saved from the lobby, or the built in list. the tier
+--                 names are ours, the colors are the shop's
+--   tint          colors the picture
+--   neon          makes the gun glow: neon material only glows where nothing is drawn over it, so the
+--                 picture (skin or the game's own) comes off while it's on and the gun glows as a solid
+--                 shape, in its base colors or one color, with a glowing edge and an optional light
+-- with cosmetic sync on, another EclX user's guns wear the skins they picked (the picture only)
+-- what the game had is held through override, so turning anything off puts the gun back as it was
+
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+local override = dote.m()
+local utility = dote.j()
+
+local GLOW_RANGE = 6
+local GLOW_NAME = "EclXGlow"
+local OUTLINE_NAME = "EclXNeon"
+
+local LocalPlayer = Players.LocalPlayer
+
+local main = {}
+main.__index = main
+
+-- every gun the game lets you skin, from its tool list (Shared.ToolMeta, MarketplaceAvailable), sorted.
+-- read from the game so it fits whatever version this is
+function main.gunNames()
+    local names = {}
+    local shared = ReplicatedStorage:FindFirstChild("Shared")
+    local meta = shared and shared:FindFirstChild("ToolMeta")
+    if meta then
+        for _, tool in meta:GetChildren() do
+            if tool:GetAttribute("MarketplaceAvailable") then
+                table.insert(names, tool.Name)
+            end
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+-- the shop colors a skin's tile (ItemUtil:getItemColor); mostly by price, but the game can give any skin
+-- its own color (Solid Gold is white). the tier names are ours, matched to those colors
+local TIERS = {
+    { name = "Default", hex = "adadad", below = 1 },
+    { name = "Common", hex = "1dd1a1", below = 1000 },
+    { name = "Rare", hex = "54a0ff", below = 2000 },
+    { name = "Epic", hex = "8f5dbe", below = 4000 },
+    { name = "Legendary", hex = "ff9f43", below = math.huge },
+    { name = "Special", hex = "ffffff" },
+    { name = "Exclusive", hex = "ff6b6b" },
+}
+local TIER_ORDER = {}
+local TIER_BY_HEX = {}
+for order, tier in TIERS do
+    tier.color = Color3.fromHex(tier.hex)
+    TIER_ORDER[tier.name] = order
+    TIER_BY_HEX[tier.hex] = tier
+end
+
+-- the skin list as the lobby has it. match servers don't carry Shared.Items, so this is what they use;
+-- whenever the live list is there it's read instead and saved to SAVED_FILE, so new skins carry over.
+-- { item id, name, cost (nil for event unlocks), texture id, tile color }
+local BUILT_IN = {
+    { "30000", "Default Skin", 0, 618987396, "adadad" },
+    { "30001", "Exclusive Unlock", nil, 4967771330, "ff6b6b" },
+    { "30002", "Exclusive Unlock", nil, 14315850743, "ff6b6b" },
+    { "30003", "Exclusive Unlock", nil, 6051577829, "ff6b6b" },
+    { "30004", "Exclusive Unlock", nil, 6408360365, "ff6b6b" },
+    { "30005", "Exclusive Unlock", nil, 4747183214, "ff6b6b" },
+    { "30006", "Exclusive Unlock", nil, 5250086816, "ff6b6b" },
+    { "30007", "Exclusive Unlock", nil, 7463201751, "ff6b6b" },
+    { "30008", "Exclusive Unlock", nil, 6053040323, "ff6b6b" },
+    { "30009", "Exclusive Unlock", nil, 4830192210, "ff6b6b" },
+    { "30010", "Red Camo", 500, 14055600751, "1dd1a1" },
+    { "30011", "Sea Topo", 500, 14055602841, "1dd1a1" },
+    { "30012", "Nighttime Camo", 1000, 14055594977, "54a0ff" },
+    { "30013", "Daytime Camo", 3000, 14055581952, "8f5dbe" },
+    { "30014", "Liquid Combination", 6000, 14055593198, "ff9f43" },
+    { "30015", "Blue Fade", 500, 14055577820, "1dd1a1" },
+    { "30016", "Pixel Flame", 150, 14055598030, "1dd1a1" },
+    { "30017", "Tactical", 200, 14055604610, "1dd1a1" },
+    { "30018", "Wavy Team Colors", 800, 14055606357, "1dd1a1" },
+    { "30019", "Caprice", 3000, 14055580887, "8f5dbe" },
+    { "30020", "Fade", 300, 14055588266, "1dd1a1" },
+    { "30021", "Magma", 6000, 14055594022, "ff9f43" },
+    { "30022", "Blue Hexagon", 1000, 14055579005, "54a0ff" },
+    { "30023", "Solid Gold", 3500, 14055603828, "ffffff" },
+    { "30024", "Professional", 6000, 14055599582, "ff9f43" },
+    { "30025", "Web", 1250, 14055607004, "54a0ff" },
+    { "30026", "Hexagonal", 2000, 14055590691, "8f5dbe" },
+    { "30027", "Electric", 6000, 14055587368, "ff9f43" },
+    { "30028", "Hexagons", 900, 14055592076, "1dd1a1" },
+    { "30029", "Glitched Crystal", 3000, 14055589403, "8f5dbe" },
+    { "30030", "Eclipsis Colored Polygons", 1000, 14055586296, "54a0ff" },
+    { "30031", "Pastel", 6000, 14055597108, "ff9f43" },
+    { "30032", "Noob Assault", 2500, 14055595812, "8f5dbe" },
+    { "30033", "Trial by Fire", 6000, 14055605662, "ff9f43" },
+    { "30034", "Digital Camoflauge", 1000, 14055584328, "54a0ff" },
+    { "30035", "Rust", 1000, 14055601797, "54a0ff" },
+    { "30036", "Dented Opal", 2000, 14055583035, "8f5dbe" },
+    { "30037", "Exclusive Unlock", nil, 14315905348, "ff6b6b" },
+}
+local SAVED_FILE = "eclx/skins.json"
+
+-- dropdown picks that aren't a skin
+main.EVERY_GUN = "Every Gun"
+main.CUSTOM = "Custom ID"
+
+local catalog
+local readLive=function()    
+
+
+local shared = ReplicatedStorage:FindFirstChild("Shared")
+    local items = shared and shared:FindFirstChild("Items")
+    if not items then
+        return nil
+    end
+    local okUtil, ItemUtil = pcall(require, shared.Utilities.ItemUtil)
+
+    local raw = {}
+    for _, item in items:GetChildren() do
+        if item:GetAttribute("ItemType") ~= "Skin" then
+            continue
+        end
+        local decal = item:FindFirstChildWhichIsA("Decal", true)
+        local texture = decal and tonumber(string.match(decal.Texture, "%d+"))
+        if not texture then
+            continue
+        end
+        local cost = item:GetAttribute("ItemCost")
+        local tile = nil
+        if okUtil then
+            local okColor, color = pcall(ItemUtil.getItemColor, ItemUtil, tonumber(item.Name) or item.Name)
+            tile = (okColor and typeof(color) == "Color3" and{(color:ToHex() )}or{nil
+})[1]        end
+        table.insert(raw, {
+            item.Name,
+            tostring(item:GetAttribute("ItemName") or item.Name),
+(typeof(cost) == "number" and{cost }or{nil})[1],
+            texture,
+            tile,
+        })
+    end
+    return (#raw > 0 and{raw }or{nil
+})[1]end local readSaved=function()    
+
+
+
+if not (isfile and readfile) then
+        return nil
+    end
+    local ok, raw = pcall(function()
+        return (isfile(SAVED_FILE) and{(HttpService:JSONDecode(readfile(SAVED_FILE)) )}or{nil
+})[1]    end)
+    return (ok and typeof(raw) == "table" and #raw > 0 and{raw }or{nil
+})[1]end local tierOf=function(
+
+cost, tile)    
+local tier = tile and TIER_BY_HEX[string.lower(tile)]
+    if tier then
+        return tier
+    end
+    if cost == nil then
+        return TIER_BY_HEX.ff6b6b
+    end
+    for _, band in TIERS do
+        if band.below and cost < band.below then
+            return band
+        end
+    end
+    return TIER_BY_HEX.ff9f43
+end
+-- the game's skins: { key, name, tier, color, texture }, cheapest tier first. key is what a dropdown
+-- stores: the skin's name, with the item id added for the event skins, which all share one name
+
+function main.catalog()
+    if catalog then
+        return catalog
+    end
+    catalog = { list = {}, byKey = {} }
+
+    local raw = readLive()
+    if raw then
+        if writefile then
+            pcall(writefile, SAVED_FILE, HttpService:JSONEncode(raw))
+        end
+    else
+        raw = readSaved() or BUILT_IN
+    end
+
+    local names = {}
+    for _, skin in raw do
+        names[skin[2] ] = (names[skin[2] ] or 0) + 1
+    end
+    for _, skin in raw do
+        local id, name, cost, texture, tile = skin[1], skin[2], skin[3], skin[4], skin[5]
+        local tier = tierOf(cost, tile)
+        local key = (names[name] > 1 and{(string.format('%s (%s)', tostring(name), tostring(id)))}or{name
+})[1]        local entry = {
+            key = key,
+            name = name,
+            tier = tier.name,
+            color = tier.color,
+            texture = string.format('rbxassetid://%s', tostring(texture)),
+            cost = cost or 0,
+        }
+        table.insert(catalog.list, entry)
+        catalog.byKey[key] = entry
+    end
+
+    table.sort(catalog.list, function(a, b)
+        if a.tier ~= b.tier then
+            return TIER_ORDER[a.tier] < TIER_ORDER[b.tier]
+        end
+        if a.cost ~= b.cost then
+            return a.cost < b.cost
+        end
+        return a.key < b.key
+    end)
+    return catalog
+end
+
+-- dropdown values: every skin's key, then the custom option
+function main.skinKeys(withEveryGun)
+    local keys = {}
+    if withEveryGun then
+        table.insert(keys, main.EVERY_GUN)
+    end
+    for _, entry in main.catalog().list do
+        table.insert(keys, entry.key)
+    end
+    table.insert(keys, main.CUSTOM)
+    return keys
+end
+
+-- how a pick shows in a dropdown: the name, then the tier in its color
+function main.displaySkin(key)
+    local entry = main.catalog().byKey[key]
+    if not entry then
+        return key
+    end
+    -- the event skins all share one name, so they show their item number too
+    return string.format('%s  <font color="#%s"><b>%s</b></font>', tostring(entry.key), tostring(entry.color:ToHex()), tostring(string.upper(entry.tier)))
+end
+
+-- sync (optional): cosmetic sync, for other EclX users' own skins
+function main.new(sync)
+    return setmetatable({
+        sync = sync,
+        held = override.new(),
+        tools = {}, -- our tools -> true
+        glows = {},
+        othersHeld = override.new(),
+        otherTools = {}, -- tools other players hold -> their player
+    }, main)
+end
+local resolve=function(
+pick, customId)    
+if pick == main.CUSTOM then
+        return utility.imageContent(customId)
+    end
+    local entry = pick and main.catalog().byKey[pick]
+    return entry and entry.texture
+end
+
+function main:_skinFor(tool)
+    local own = Options[string.format('Skins/Gun/%s', tostring(tool.Name))]
+    if own and own.Value and own.Value ~= main.EVERY_GUN then
+        return resolve(own.Value, Options[string.format('Skins/GunId/%s', tostring(tool.Name))].Value)
+    end
+    return resolve(Options["Skins/Every"].Value, Options["Skins/AllGuns"].Value)
+end
+local syncedSkin=function(
+
+
+cosmetics, gunName)    
+local pick = cosmetics.gunSkins and cosmetics.gunSkins[gunName]
+    if typeof(pick) == "string" then
+        local id = string.match(pick, "^id:(%d+)$")
+        return (id and{(utility.imageContent(id) )}or{(resolve(pick)
+)})[1]    end
+    if cosmetics.skinImage then
+        return utility.imageContent(cosmetics.skinImage)
+    end
+    return (typeof(cosmetics.skin) == "string" and{(resolve(cosmetics.skin) )}or{nil
+})[1]end local putImage=function(
+
+
+held, handle, image)    
+local mesh = handle:FindFirstChildOfClass("SpecialMesh")
+    local decal = handle:FindFirstChild("ToolTexture")
+    if mesh then
+        held:set(mesh, "TextureId", image)
+    end
+    if decal and decal:IsA("Decal") then
+        held:set(decal, "Texture", image)
+    end
+    if handle:IsA("MeshPart") then
+        held:set(handle, "TextureID", image)
+    end
+end
+
+function main:_apply(tool)
+    local held = self.held
+    local handle = tool:FindFirstChild("Handle")
+    if not handle then
+        return
+    end
+
+    if Toggles.Skins.Value then
+        local image = self:_skinFor(tool)
+        local tint = Options["Skins/Tint"].Value
+        local mesh = handle:FindFirstChildOfClass("SpecialMesh")
+        local decal = handle:FindFirstChild("ToolTexture")
+        if image then
+            putImage(held, handle, image)
+        end
+        if mesh then
+            held:set(mesh, "VertexColor", Vector3.new(tint.R, tint.G, tint.B))
+        end
+        if decal and decal:IsA("Decal") then
+            held:set(decal, "Color3", tint)
+        end
+    end
+
+    if Toggles["Skins/Neon"].Value then
+        local recolor = not Toggles["Skins/KeepColors"].Value
+        local color = Options["Skins/NeonColor"].Value
+        local mesh = handle:FindFirstChildOfClass("SpecialMesh")
+        if mesh then
+            held:set(mesh, "TextureId", "")
+            held:set(mesh, "VertexColor", Vector3.one)
+        end
+        if handle:IsA("MeshPart") then
+            held:set(handle, "TextureID", "")
+        end
+        for _, decal in handle:GetChildren() do
+            if decal:IsA("Decal") then
+                held:set(decal, "Transparency", 1)
+            end
+        end
+        for _, part in tool:GetDescendants() do
+            if part:IsA("BasePart") and part.Transparency < 1 then
+                held:set(part, "Material", Enum.Material.Neon)
+                if recolor then
+                    held:set(part, "Color", color)
+                end
+            end
+        end
+
+        -- this game's bloom only catches very bright things, so neon alone reads as flat plastic. an
+        -- unlit highlight fill and a bright edge make it read as lit from inside; walls still hide it
+        if Toggles["Skins/NeonOutline"].Value then
+            local outline = tool:FindFirstChild(OUTLINE_NAME) or Instance.new("Highlight")
+            outline.Name = OUTLINE_NAME
+            outline.DepthMode = Enum.HighlightDepthMode.Occluded
+            outline.FillColor = color
+            -- with the gun's own colors kept, only the edge takes the neon color
+            outline.FillTransparency = recolor and 0.55 or 1
+            outline.OutlineColor = color
+            outline.OutlineTransparency = 0
+            outline.Adornee = tool
+            outline.Parent = tool
+            self.glows[outline] = true
+        end
+
+        local brightness = Options["Skins/Glow"].Value
+        if brightness > 0 then
+            local light = handle:FindFirstChild(GLOW_NAME) or Instance.new("PointLight")
+            light.Name = GLOW_NAME
+            light.Brightness = brightness
+            light.Range = GLOW_RANGE
+            light.Shadows = false
+            light.Color = color
+            light.Parent = handle
+            self.glows[light] = true
+        end
+    end
+end
+
+-- puts every tool back, then dresses them again with the current settings
+function main:refresh()
+    self.held:releaseAll()
+    for light in self.glows do
+        light:Destroy()
+    end
+    table.clear(self.glows)
+
+    for tool in self.tools do
+        if tool.Parent then
+            self:_apply(tool)
+        else
+            self.tools[tool] = nil
+        end
+    end
+end
+
+function main:_track(tool)
+    if not tool:IsA("Tool") or self.tools[tool] then
+        return
+    end
+    self.tools[tool] = true
+    -- the handle's mesh and decal can come in after the tool
+    task.defer(function()
+        if tool.Parent then
+            self:_apply(tool)
+        end
+    end)
+end
+
+function main:_applyOther(tool, player)
+    local handle = tool:FindFirstChild("Handle")
+    local cosmetics = handle and self.sync:cosmeticsOf(player)
+    local image = cosmetics and syncedSkin(cosmetics, tool.Name)
+    if image then
+        putImage(self.othersHeld, handle, image)
+    end
+end
+
+-- puts every other player's gun back, then dresses them again with what's synced
+function main:refreshOthers()
+    self.othersHeld:releaseAll()
+    for tool, player in self.otherTools do
+        if tool.Parent and player.Parent then
+            self:_applyOther(tool, player)
+        else
+            self.otherTools[tool] = nil
+        end
+    end
+end
+
+-- another player's guns show only while held, in their character
+function main:_watchOther(player)
+local onChild=function(child)        
+if child:IsA("Tool") then
+            self.otherTools[child] = player
+            task.defer(function()
+                if child.Parent then
+                    self:_applyOther(child, player)
+                end
+            end)
+        end
+end local onCharacter=function(
+character)        
+for _, child in character:GetChildren() do
+            onChild(child)
+        end
+        character.ChildAdded:Connect(onChild)
+end    
+if player.Character then
+        onCharacter(player.Character)
+    end
+    player.CharacterAdded:Connect(onCharacter)
+end
+
+function main:_watch(container)
+    for _, child in container:GetChildren() do
+        self:_track(child)
+    end
+    container.ChildAdded:Connect(function(child)
+        self:_track(child)
+    end)
+end
+
+function main:start(gunNames)
+local onPlayerChild=function(child)        
+if child:IsA("Backpack") then
+            self:_watch(child)
+        end
+end    
+for _, child in LocalPlayer:GetChildren() do
+        onPlayerChild(child)
+    end
+    LocalPlayer.ChildAdded:Connect(onPlayerChild)
+    if LocalPlayer.Character then
+        self:_watch(LocalPlayer.Character)
+    end
+    LocalPlayer.CharacterAdded:Connect(function(character)
+        self:_watch(character)
+    end)
+
+    local refresh = function()
+        self:refresh()
+    end
+    for _, name in { "Skins", "Skins/Neon", "Skins/KeepColors", "Skins/NeonOutline" } do
+        Toggles[name]:OnChanged(refresh)
+    end
+    for _, name in { "Skins/Every", "Skins/AllGuns", "Skins/Tint", "Skins/NeonColor", "Skins/Glow" } do
+        Options[name]:OnChanged(refresh)
+    end
+    for _, gun in gunNames do
+        Options[string.format('Skins/Gun/%s', tostring(gun))]:OnChanged(refresh)
+        Options[string.format('Skins/GunId/%s', tostring(gun))]:OnChanged(refresh)
+    end
+
+    if self.sync then
+        for _, player in Players:GetPlayers() do
+            if player ~= LocalPlayer then
+                self:_watchOther(player)
+            end
+        end
+        Players.PlayerAdded:Connect(function(player)
+            self:_watchOther(player)
+        end)
+        self.sync.changed:Connect(function()
+            self:refreshOthers()
+        end)
+    end
+end
+
+return main
+end function dote.n()local v=dote.cache.n if not v then v={c=__modImpl()}dote.cache.n=v end return v.c end end do local __modImpl=function()-- cosmetic sync: shares your cosmetics with other EclX users through your own cloudflare worker (see
+-- worker/), and fetches theirs, so you see each other's skins, tracers, impacts, muzzle flashes, bore beams
+-- and avatars. nothing here touches the game's server; it's the executor's own http (request), which the
+-- game never sees.
+--   publish   your cosmetics are sent whenever one changes (a couple of seconds after, so dragging a color
+--             picker is one send). only what you have turned on is sent
+--   lookup    the players in this server are looked up when you join, when someone joins, and every
+--             LOOKUP_EVERY seconds; their cosmetics are kept until the next lookup
+-- the worker and its key are baked in below, so it works with no setup.
+-- usage: local sync = Sync.new(); sync:start(notify); sync:cosmeticsOf(player) -> table or nil
+--        sync.changed:Connect(function() end)   someone's cosmetics changed
+
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+
+local signal = dote.a()
+
+local WORKER_URL = "https://eclx-sync.eclx-sync.workers.dev"
+local WORKER_KEY = "password"
+local LOOKUP_EVERY = 60
+local PUBLISH_DELAY = 2
+-- a player joining waits this long, so a group joining at once is one lookup
+local JOIN_DELAY = 3
+
+local CUSTOM_SKIN = "Custom ID"
+local EVERY_GUN = "Every Gun"
+
+local LocalPlayer = Players.LocalPlayer
+
+local Sync = {}
+Sync.__index = Sync
+
+function Sync.new()
+    return setmetatable({
+        changed = signal.new(),
+        remote = {}, -- tostring(userId) -> their cosmetics
+        publishToken = 0,
+        lookupToken = 0,
+        lastPublished = nil,
+        lookupStatus = nil, -- what the last lookup found, for the status label
+    }, Sync)
+end
+local httpRequest=function()    
+
+return request or http_request or (syn and syn.request) or (http and http.request)
+end local hex=function(
+
+color)    
+return string.lower(color:ToHex())
+end
+-- what we show, by what's on
+
+function Sync.ownCosmetics()
+    local cosmetics = {}
+    if Toggles.Tracers.Value then
+        cosmetics.tracerColor = hex(Options["Tracers/Color"].Value)
+    end
+    if Toggles["Tracers/Impact"].Value then
+        cosmetics.impactColor = hex(Options["Tracers/ImpactColor"].Value)
+    end
+    if Toggles["Tracers/Muzzle"].Value then
+        cosmetics.muzzleColor = hex(Options["Tracers/MuzzleColor"].Value)
+    end
+    if Toggles.Skins.Value then
+        local skin = Options["Skins/Every"].Value
+        if skin == CUSTOM_SKIN then
+            cosmetics.skinImage = string.match(tostring(Options["Skins/AllGuns"].Value), "%d+")
+        elseif skin then
+            cosmetics.skin = skin
+        end
+        -- a gun's own pick: the skin's name, or "id:<image id>" for a custom one
+        local gunSkins = {}
+        for name, option in Options do
+            local gun = string.match(name, "^Skins/Gun/(.+)$")
+            local pick = gun and option.Value
+            if pick == CUSTOM_SKIN then
+                local id = string.match(tostring(Options[string.format('Skins/GunId/%s', tostring(gun))].Value), "%d+")
+                gunSkins[gun] = id and string.format('id:%s', tostring(id))            
+elseif pick and pick ~= EVERY_GUN then
+                gunSkins[gun] = pick
+            end
+        end
+        if next(gunSkins) then
+            cosmetics.gunSkins = gunSkins
+        end
+    end
+    if Toggles.BoreBeamColorChange.Value then
+        cosmetics.boreBeamColor = hex(Options.BoreBeamColor.Value)
+        cosmetics.boreBeamColorCharged = hex(Options.BoreBeamColorCharged.Value)
+    end
+    if Toggles.BoreFlareColors.Value then
+        cosmetics.boreFlareColor = hex(Options.BoreFlareColorOne.Value)
+        cosmetics.boreFlareColor2 = hex(Options.BoreFlareColorTwo.Value)
+    end
+    if Toggles["Avatar/Enabled"].Value then
+        cosmetics.bundleId = string.match(tostring(Options["Avatar/BundleId"].Value), "%d+")
+        cosmetics.bundleKeepAccessories = Toggles["Avatar/KeepAccessories"].Value
+    end
+    return cosmetics
+end
+
+-- one request to the worker; the decoded reply, or nil and why
+function Sync:_send(method, path, body)
+    local send = httpRequest()
+    if not send then
+        return nil, "this executor can't make web requests"
+    end
+    local ok, response = pcall(send, {
+        Url = WORKER_URL .. path,
+        Method = method,
+        Headers = { ["Content-Type"] = "application/json", ["Authorization"] = string.format('Bearer %s', tostring(WORKER_KEY))},
+        Body = HttpService:JSONEncode(body),
+    })
+    if not ok or typeof(response) ~= "table" then
+        return nil, "couldn't reach the worker"
+    end
+    local decoded = nil
+    pcall(function()
+        decoded = HttpService:JSONDecode(response.Body)
+    end)
+    if response.StatusCode ~= 200 then
+        local reason = typeof(decoded) == "table" and decoded.error or string.format('error %s', tostring(response.StatusCode))        
+return nil, reason
+    end
+    return decoded
+end
+
+function Sync:publish()
+    if not Toggles.Sync.Value then
+        return
+    end
+    local cosmetics = Sync.ownCosmetics()
+    local encoded = HttpService:JSONEncode(cosmetics)
+    if encoded == self.lastPublished then
+        return
+    end
+local _, err =self:_send("PUT", string.format('/cosmetics/%s', tostring(LocalPlayer.UserId)), cosmetics)
+    if err then
+        self:_status(string.format("couldn't send yours: %s", tostring(err)), true)
+        return
+    end
+    self.lastPublished = encoded
+    -- keeps the count from the last lookup, if there was one
+    self:_status(self.lookupStatus or "connected")
+end
+
+-- sends a moment after the last change, so a burst of changes is one request
+function Sync:schedulePublish()
+    self.publishToken =self.publishToken+ 1
+    local token = self.publishToken
+    task.delay(PUBLISH_DELAY, function()
+        if token == self.publishToken then
+            self:publish()
+        end
+    end)
+end
+
+function Sync:lookup()
+    if not Toggles.Sync.Value then
+        return
+    end
+    local userIds = {}
+    for _, player in Players:GetPlayers() do
+        if player ~= LocalPlayer then
+            table.insert(userIds, player.UserId)
+        end
+    end
+    if #userIds == 0 then
+        self.lookupStatus = nil
+        if next(self.remote) then
+            table.clear(self.remote)
+            self.changed:Fire()
+        end
+        return
+    end
+    local found, err = self:_send("POST", "/lookup", { userIds = userIds })
+    if err then
+        self:_status(string.format("couldn't look anyone up: %s", tostring(err)), true)
+        return
+    end
+    local encodedBefore = HttpService:JSONEncode(self.remote)
+    self.remote = {}
+    for userId, cosmetics in found do
+        if typeof(cosmetics) == "table" then
+            self.remote[tostring(userId)] = cosmetics
+        end
+    end
+    local count = 0
+    for _ in self.remote do
+        count =count+ 1
+    end
+    self.lookupStatus = count == 1 and"connected, 1 other EclX user here" or string.format('connected, %s other EclX users here', tostring(count))    
+self:_status(self.lookupStatus)
+    if HttpService:JSONEncode(self.remote) ~= encodedBefore then
+        self.changed:Fire()
+    end
+end
+
+function Sync:scheduleLookup(delay)
+    self.lookupToken =self.lookupToken+ 1
+    local token = self.lookupToken
+    task.delay(delay, function()
+        if token == self.lookupToken then
+            self:lookup()
+        end
+    end)
+end
+
+-- another player's synced cosmetics, while showing them is on
+function Sync:cosmeticsOf(player)
+    if not (player and Toggles.Sync.Value and Toggles["Sync/ShowOthers"].Value) then
+        return nil
+    end
+    return self.remote[tostring(player.UserId)]
+end
+
+function Sync:_status(text, isError)
+    self.statusText = text
+    if self.onStatus then
+        self.onStatus(text, isError)
+    end
+end
+
+-- onStatus(text, isError) is told how the last request went, for the label in Settings
+function Sync:start(onStatus)
+    self.onStatus = onStatus
+
+    Toggles.Sync:OnChanged(function(enabled)
+        if enabled then
+            self.lastPublished = nil
+            self:schedulePublish()
+            self:scheduleLookup(1)
+        else
+            table.clear(self.remote)
+            self.changed:Fire()
+            self:_status("off")
+        end
+    end)
+    Toggles["Sync/ShowOthers"]:OnChanged(function()
+        self.changed:Fire()
+    end)
+local onCosmetic=function()        
+
+
+self:schedulePublish()
+end    
+for _, name in { "Tracers", "Tracers/Impact", "Tracers/Muzzle", "Skins", "BoreBeamColorChange", "BoreFlareColors", "Avatar/Enabled", "Avatar/KeepAccessories" } do
+        Toggles[name]:OnChanged(onCosmetic)
+    end
+    for _, name in { "Tracers/Color", "Tracers/ImpactColor", "Tracers/MuzzleColor", "Skins/Every", "Skins/AllGuns", "BoreBeamColor", "BoreBeamColorCharged", "BoreFlareColorOne", "BoreFlareColorTwo", "Avatar/BundleId" } do
+        Options[name]:OnChanged(onCosmetic)
+    end
+    -- each gun's own skin pick and custom id
+    for name, option in Options do
+        if string.match(name, "^Skins/Gun") then
+            option:OnChanged(onCosmetic)
+        end
+    end
+
+    Players.PlayerAdded:Connect(function()
+        self:scheduleLookup(JOIN_DELAY)
+    end)
+    Players.PlayerRemoving:Connect(function(player)
+        if self.remote[tostring(player.UserId)] then
+            self.remote[tostring(player.UserId)] = nil
+            self.changed:Fire()
+        end
+    end)
+
+    task.spawn(function()
+        while true do
+            task.wait(LOOKUP_EVERY)
+            self:lookup()
+        end
+    end)
+
+    if Toggles.Sync.Value then
+        self:schedulePublish()
+        self:scheduleLookup(1)
+    end
+end
+
+return Sync
+end function dote.o()local v=dote.cache.o if not v then v={c=__modImpl()}dote.cache.o=v end return v.c end end do local __modImpl=function()-- who's playing and what they're doing right now: team, health, iridium, the tool in hand, laser strikes /
 -- orbital shields carried and suit upgrades. spectators are left out everywhere. the hud, the player tags
 -- and the minimap all read from one roster, so each character is only looked through once per sample.
 --   positions refresh every frame, everything else SAMPLE times a second
@@ -5635,7 +7321,7 @@ function Roster:indexOf(info)
 end
 
 return Roster
-end function dote.j()local v=dote.cache.j if not v then v={c=__modImpl()}dote.cache.j=v end return v.c end end do local __modImpl=function()-- the viewer's camera. C steps through the follow modes, F flies free:
+end function dote.p()local v=dote.cache.p if not v then v={c=__modImpl()}dote.cache.p=v end return v.c end end do local __modImpl=function()-- the viewer's camera. C steps through the follow modes, F flies free:
 --   roblox   the normal roblox camera on the watched player: right mouse drag turns, the wheel zooms
 --   orbit    a smoothed camera that orbits them, driven here (the game leaves a Scriptable camera alone)
 --   chase    the orbit camera, but it swings round behind them as they turn
@@ -6020,7 +7706,7 @@ function Camera:destroy()
 end
 
 return Camera
-end function dote.k()local v=dote.cache.k if not v then v={c=__modImpl()}dote.cache.k=v end return v.c end end do local __modImpl=function()-- the viewer's broadcast hud, laid out like a counter strike match:
+end function dote.q()local v=dote.cache.q if not v then v={c=__modImpl()}dote.cache.q=v end return v.c end end do local __modImpl=function()-- the viewer's broadcast hud, laid out like a counter strike match:
 --   top        the scorebar: each team's kills, players still up, beacons placed and iridium spent
 --   left/right a card per player down each side: health, iridium, what they hold, orbitals, K / D.
 --              click one (or press its number) to watch them
@@ -6030,8 +7716,8 @@ end function dote.k()local v=dote.cache.k if not v then v={c=__modImpl()}dote.ca
 
 
 local theme = dote.b()
-local Roster = dote.j()
-local Camera = dote.k()
+local Roster = dote.p()
+local Camera = dote.q()
 
 local colors = theme.colors
 local fonts = theme.fonts
@@ -7081,7 +8767,7 @@ function Hud:update()
 end
 
 return Hud
-end function dote.l()local v=dote.cache.l if not v then v={c=__modImpl()}dote.cache.l=v end return v.c end end do local __modImpl=function()-- a broadcast-style tag over every player: name in their team color, health and iridium bars, the orbitals
+end function dote.r()local v=dote.cache.r if not v then v={c=__modImpl()}dote.cache.r=v end return v.c end end do local __modImpl=function()-- a broadcast-style tag over every player: name in their team color, health and iridium bars, the orbitals
 -- they carry and what's in their hands, plus a team colored outline through walls so you can always see
 -- where everyone is. players off screen get a marker on the edge pointing their way.
 
@@ -7400,290 +9086,8 @@ function Tags:update()
 end
 
 return Tags
-end function dote.m()local v=dote.cache.m if not v then v={c=__modImpl()}dote.cache.m=v end return v.c end end do local __modImpl=function()
-local UserInputService = game:GetService("UserInputService")
-local Players = game:GetService("Players")
-
--- wall check: a ray from origin to the part that only stops on something solid (CanCollide), passing
--- through both characters, the camera and anything see-through to the game's own collisions
-local visibilityParams = RaycastParams.new()
-visibilityParams.FilterType = Enum.RaycastFilterType.Exclude
-visibilityParams.RespectCanCollide = true
-
-local VISIBILITY_PARTS = { "Head", "HumanoidRootPart" }
-local visiblePart=function(
-
-
-origin, character, preferred)    
-visibilityParams.FilterDescendantsInstances = { Players.LocalPlayer.Character, character, workspace.CurrentCamera }
-
-    local names = VISIBILITY_PARTS
-    if preferred and preferred ~= VISIBILITY_PARTS[1] then
-        names = { preferred, VISIBILITY_PARTS[1], VISIBILITY_PARTS[2] }
-    end
-
-    for _, name in names do
-        local part = character:FindFirstChild(name)
-        if part and part:IsA("BasePart") and not workspace:Raycast(origin, part.Position - origin, visibilityParams) then
-            return part
-        end
-    end
-    return nil
-end local shotOrigin=function()    
-
-
-
-local character = Players.LocalPlayer.Character
-    local head = character and character:FindFirstChild("Head")
-    return (head and{(head.Position )}or{(workspace.CurrentCamera.CFrame.Position
-)})[1]end local GetClosestPlayer=function(
-
-
-fovRadius, teamCheck, wallCheck)    
-local mousePos = UserInputService:GetMouseLocation()
-    local fovSq = (fovRadius or 300) ^ 2
-    local camera = workspace.CurrentCamera
-    local LocalPlayer = Players.LocalPlayer
-    local origin = wallCheck and shotOrigin()
-
-    local closestPlayer = nil
-    local closestDistSq = fovSq
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then
-            continue
-        end
-
-        if teamCheck and player.Team == LocalPlayer.Team then
-            continue
-        end
-
-        local character = player.Character
-        if not character then
-            continue
-        end
-
-        local humanoid = character:FindFirstChildWhichIsA("Humanoid")
-        if not (humanoid and humanoid.Health > 0) then
-            continue
-        end
-
-        local rootPart = character.PrimaryPart or character:FindFirstChild("HumanoidRootPart")
-        if not rootPart then
-            continue
-        end
-
-        local screenPos, onScreen = camera:WorldToScreenPoint(rootPart.Position)
-        if not onScreen then
-            continue
-        end
-
-        local dx, dy = screenPos.X - mousePos.X, screenPos.Y - mousePos.Y
-        local distSq = dx * dx + dy * dy
-
-        -- the ray is the expensive part, so it only runs for a player that would win
-        if distSq < closestDistSq and not (origin and not visiblePart(origin, character)) then
-            closestDistSq = distSq
-            closestPlayer = player
-        end
-    end
-
-    if closestPlayer then
-        return closestPlayer.Character, math.sqrt(closestDistSq)
-    end
-    return nil, nil
-end local circle=function(
-
-info)    
-local drawing = Drawing.new("Circle")
-    drawing.Position = info.Position or Vector2.new(150, 150)
-    drawing.Radius = info.Radius or 20
-    drawing.Filled = false
-    drawing.Thickness = info.Thickness or 2
-
-    return drawing
-end local label=function(
-
-info)    
-local text = Drawing.new("Text")
-    text.Text = info.Text or "Hello, World!"
-    text.Position = info.Position or Vector2.new(150, 150)
-    text.Color = info.Color or Color3.new(0.968627, 0.972549, 0.968627)
-    text.Size = 18
-    text.Font = Drawing.Fonts.Monospace
-    text.Visible = true
-
-    return text
-end local line=function(
-
-info)    
-local drawing = Drawing.new("Line")
-    drawing.Visible = info.Visible or false
-    drawing.Transparency = info.Transparency or 1
-    drawing.Color = info.Color or Color3.fromRGB(0, 0, 0)
-
-    drawing.Thickness = info.Thickness or 1
-    return drawing
-end local isAliveModel=function(
-
-character)    
-if character and character.IsDescendantOf(character, workspace) and character.PrimaryPart ~= nil then
-        return character
-    end
-
-    return false
-end local ActivateButton=function(
-
-button)	
-game:GetService('ReplicatedStorage')
-		:WaitForChild('Shared')
-		:WaitForChild('Remotes')
-		:WaitForChild('ContextButton')
-		:FireServer(button)
-end local removeValue=function(
-
-
-list, value)    
-for i, v in ipairs(list) do
-        if v == value then
-            table.remove(list, i)
-            return
-        end
-    end
-end local roundRotationTo15Degrees=function(
-
-
-cf)    
-local x, y, z = cf:ToEulerAnglesXYZ()
-local roundTo15=function(angle)        
-return math.rad(math.round(math.deg(angle) / 15) * 15)
-end    
-return CFrame.new(cf.Position) * CFrame.Angles(roundTo15(x), roundTo15(y), roundTo15(z))
-end local parentToCoreGui=function(
-
-
-
-instance)    
-if not pcall(function()
-        instance.Parent = game:GetService("CoreGui")
-    end) then
-        instance.Parent = workspace.Terrain
-    end
-end
--- one shared __namecall hook. every namecall in the game goes through it, so stacking a hook
--- per feature costs fps; handlers are looked up by method name and get (old, self, ...)
--- a method can have several handlers: the newest runs first and its `old` continues down the chain
-
-local namecallHandlers = {}
-local oldNamecall
-local callOriginal=function(
-self, ...)    
-return oldNamecall(self, ...)
-end local installNamecall=function()    
-
-
-
-
-if oldNamecall then
-        return
-    end
-
-    oldNamecall = hookmetamethod(
-        game,
-        "__namecall",
-        LPH_JIT_MAX(function(self, ...)
-            local entry = namecallHandlers[getnamecallmethod()]
-
-            if entry and not checkcaller() then
-                return entry[1](entry[2], self, ...)
-            end
-
-            return oldNamecall(self, ...)
-        end)
-    )
-end local hookNamecall=function(
-
-
-
-method, handler, toggleNames)    -- a handler that makes its own method calls (a Raycast, a GetAttribute) changes the namecall method,
-    -- and passing the call on would then run that method on the original object instead; put it back first
-    
-local nextHandler = function(self, ...)
-        if setnamecallmethod then
-            setnamecallmethod(method)
-        end
-        return callOriginal(self, ...)
-    end
-
-    local previous = namecallHandlers[method]
-    if previous then
-        local previousHandler, previousNext = previous[1], previous[2]
-        nextHandler = function(self, ...)
-            return previousHandler(previousNext, self, ...)
-        end
-    end
-
-    namecallHandlers[method] = { handler, nextHandler }
-
-    if not toggleNames then
-        installNamecall()
-        return
-    end
-
-    for _, name in toggleNames do
-        local toggle = Toggles[name]
-        if toggle.Value then
-            installNamecall()
-        end
-        toggle:OnChanged(function(enabled)
-            if enabled then
-                installNamecall()
-            end
-        end)
-    end
-end local claimHook=function(
-
-
-
-
-feature, target)    
-local env = (getgenv and{(getgenv() )}or{_G
-})[1]    local registry = env.EclXHooks
-    if not registry then
-        registry = {}
-        env.EclXHooks = registry
-    end
-
-    local claimed = registry[feature]
-    if not claimed then
-        claimed = setmetatable({}, { __mode = "k" })
-        registry[feature] = claimed
-    end
-
-    if claimed[target] then
-        return false
-    end
-    claimed[target] = true
-    return true
-end
-
-return {
-    claimHook = claimHook,
-    visiblePart = visiblePart,
-    shotOrigin = shotOrigin,
-    GetClosestPlayer = GetClosestPlayer,
-    circle = circle,
-    label = label,
-    line = line,
-    isAliveModel = isAliveModel,
-    ActivateButton = ActivateButton,
-    removeValue = removeValue,
-    roundRotationTo15Degrees = roundRotationTo15Degrees,
-    hookNamecall = hookNamecall,
-    parentToCoreGui = parentToCoreGui,
-}
-end function dote.n()local v=dote.cache.n if not v then v={c=__modImpl()}dote.cache.n=v end return v.c end end do local __modImpl=function()
-return {}end function dote.o()local v=dote.cache.o if not v then v={c=__modImpl()}dote.cache.o=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.s()local v=dote.cache.s if not v then v={c=__modImpl()}dote.cache.s=v end return v.c end end do local __modImpl=function()
+return {}end function dote.t()local v=dote.cache.t if not v then v={c=__modImpl()}dote.cache.t=v end return v.c end end do local __modImpl=function()-- by amedote
 -- shared helpers for the orbital tools (laser strike / orbital shield): what's equipped,
 -- where it will land and whether that's within its use range.
 -- assumes the tools aim with GunClient.GetMouseInfo, so the landing point is the mouse hit
@@ -7692,7 +9096,7 @@ return {}end function dote.o()local v=dote.cache.o if not v then v={c=__modImpl(
 
 local Players = game:GetService("Players")
 
-local container = dote.o()
+local container = dote.t()
 
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
@@ -7748,12 +9152,12 @@ return {
     getRootPart = getRootPart,
     isInRange = isInRange,
 }
-end function dote.p()local v=dote.cache.p if not v then v={c=__modImpl()}dote.cache.p=v end return v.c end end do local __modImpl=function()-- laser strike danger range: a ring in their team color around every player holding a laser strike, the
+end function dote.u()local v=dote.cache.u if not v then v={c=__modImpl()}dote.cache.u=v end return v.c end end do local __modImpl=function()-- laser strike danger range: a ring in their team color around every player holding a laser strike, the
 -- size of its use range, so you can see who could strike where. the minimap draws the same ranges
 
 
-local utility = dote.n()
-local orbital = dote.p()
+local utility = dote.j()
+local orbital = dote.u()
 
 local RING_WIDTH = 1.2
 local RING_TRANSPARENCY = 0.35
@@ -7834,7 +9238,7 @@ function LsRings:destroy()
 end
 
 return LsRings
-end function dote.q()local v=dote.cache.q if not v then v={c=__modImpl()}dote.cache.q=v end return v.c end end do local __modImpl=function()-- a counter strike style overview of the map in the corner: the map's tiles drawn from above (lighter is
+end function dote.v()local v=dote.cache.v if not v then v={c=__modImpl()}dote.cache.v=v end return v.c end end do local __modImpl=function()-- a counter strike style overview of the map in the corner: the map's tiles drawn from above (lighter is
 -- higher), a dot per player in their team color with a tick for the way they face, the camera's spot and
 -- direction, every team's beacons and spawn points, shields with their health, and the laser strike range
 -- of anyone holding one. click a dot to watch that player, M blows it up.
@@ -7842,7 +9246,7 @@ end function dote.q()local v=dote.cache.q if not v then v={c=__modImpl()}dote.ca
 
 
 local theme = dote.b()
-local LsRings = dote.q()
+local LsRings = dote.v()
 
 local colors = theme.colors
 local fonts = theme.fonts
@@ -8433,7 +9837,7 @@ function Minimap:update()
 end
 
 return Minimap
-end function dote.r()local v=dote.cache.r if not v then v={c=__modImpl()}dote.cache.r=v end return v.c end end do local __modImpl=function()-- by nqjf and amedote
+end function dote.w()local v=dote.cache.w if not v then v={c=__modImpl()}dote.cache.w=v end return v.c end end do local __modImpl=function()-- by nqjf and amedote
 -- draws a predicted artillery arc from a barrel: neon segments under a highlight, cut where the shell
 -- would hit something, with a splash marker at the impact point. used for our own arty and others'
 -- usage: local arc = ArcRenderer.new(barrel, ignoreList); arc:setStyle(color, transparency); arc:draw(size); arc:destroy()
@@ -8441,7 +9845,7 @@ end function dote.r()local v=dote.cache.r if not v then v={c=__modImpl()}dote.ca
 
 local Workspace = game:GetService("Workspace")
 
-local utility = dote.n()
+local utility = dote.j()
 
 local PROJECTILE_SPEED = 137.23
 local TOTAL_DURATION = 5
@@ -8683,13 +10087,13 @@ function ArcRenderer:destroy()
 end
 
 return ArcRenderer
-end function dote.s()local v=dote.cache.s if not v then v={c=__modImpl()}dote.cache.s=v end return v.c end end do local __modImpl=function()-- the arty trajectory for every artillery someone is sitting in, in the color of the team that owns it.
+end function dote.x()local v=dote.cache.x if not v then v={c=__modImpl()}dote.cache.x=v end return v.c end end do local __modImpl=function()-- the arty trajectory for every artillery someone is sitting in, in the color of the team that owns it.
 -- the arc stays up for a few seconds after they get off. the drawing is the hub's arcrenderer
 
 
 local Players = game:GetService("Players")
 
-local ArcRenderer = dote.s()
+local ArcRenderer = dote.x()
 
 -- seconds the arc stays after the seat empties
 local LINGER = 3
@@ -8828,7 +10232,7 @@ function Arcs:destroy()
 end
 
 return Arcs
-end function dote.t()local v=dote.cache.t if not v then v={c=__modImpl()}dote.cache.t=v end return v.c end end do local __modImpl=function()-- EclX match viewer: what loads instead of the client when you join a match as a spectator. the game's
+end function dote.y()local v=dote.cache.y if not v then v={c=__modImpl()}dote.cache.y=v end return v.c end end do local __modImpl=function()-- EclX match viewer: what loads instead of the client when you join a match as a spectator. the game's
 -- spectate hud is hidden and replaced with a broadcast view: scorebar, a card per player, the watched
 -- player's panel, a kill feed, player tags, a minimap with shields and laser strike ranges, every team's
 -- arty trajectories and laser strike rings, a roblox / orbit / chase / free camera with noclip, and the
@@ -8847,13 +10251,13 @@ local theme = dote.b()
 local Tracker = dote.f()
 local StatsBoard = dote.h()
 local scoreWeights = dote.i()
-local Roster = dote.j()
-local Camera = dote.k()
-local Hud = dote.l()
-local Tags = dote.m()
-local Minimap = dote.r()
-local Arcs = dote.t()
-local LsRings = dote.q()
+local Roster = dote.p()
+local Camera = dote.q()
+local Hud = dote.r()
+local Tags = dote.s()
+local Minimap = dote.w()
+local Arcs = dote.y()
+local LsRings = dote.v()
 
 local SPECTATOR_TEAM = "Spectators"
 local SANDBOX_TEAM = "Sandbox"
@@ -9216,7 +10620,7 @@ function Viewer:Unload()
 end
 
 return Viewer
-end function dote.u()local v=dote.cache.u if not v then v={c=__modImpl()}dote.cache.u=v end return v.c end end do local __modImpl=function()
+end function dote.z()local v=dote.cache.z if not v then v={c=__modImpl()}dote.cache.z=v end return v.c end end do local __modImpl=function()
 local Players = game:GetService("Players")
 
 local artygrav = {}
@@ -9277,12 +10681,12 @@ function artygrav:start()
 end
 
 return artygrav
-end function dote.v()local v=dote.cache.v if not v then v={c=__modImpl()}dote.cache.v=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.A()local v=dote.cache.A if not v then v={c=__modImpl()}dote.cache.A=v end return v.c end end do local __modImpl=function()-- by amedote
 -- recolors distributor (iridium) beams. the color goes on the moment a beam appears and is put back
 -- whenever the game changes it, so there's no delay and no flicker back to the default
 
 
-local utility = dote.n()
+local utility = dote.j()
 
 local main = {}
 main.__index = main
@@ -9385,13 +10789,13 @@ Toggles.ChangeBeamColors:OnChanged(handleColorChange)
 end
 
 return main
-end function dote.w()local v=dote.cache.w if not v then v={c=__modImpl()}dote.cache.w=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.B()local v=dote.cache.B if not v then v={c=__modImpl()}dote.cache.B=v end return v.c end end do local __modImpl=function()-- by amedote
 
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
-local utility = dote.n()
+local utility = dote.j()
 
 local ToolProducer = require(
     ReplicatedStorage:WaitForChild("Client")
@@ -9482,13 +10886,13 @@ function main:start()
 end
 
 return main
-end function dote.x()local v=dote.cache.x if not v then v={c=__modImpl()}dote.cache.x=v end return v.c end end do local __modImpl=function()-- by nqjf
+end function dote.C()local v=dote.cache.C if not v then v={c=__modImpl()}dote.cache.C=v end return v.c end end do local __modImpl=function()-- by nqjf
 
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
-local container = dote.o()
+local container = dote.t()
 
 local SpawnPointController =
     require(ReplicatedStorage:WaitForChild("Client"):WaitForChild("Loader"):WaitForChild("SpawnPointController"))
@@ -9577,7 +10981,7 @@ function main:update()
 end
 
 return main
-end function dote.y()local v=dote.cache.y if not v then v={c=__modImpl()}dote.cache.y=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.D()local v=dote.cache.D if not v then v={c=__modImpl()}dote.cache.D=v end return v.c end end do local __modImpl=function()-- by amedote
 -- usage: the aim key (left click by default) on a bore starts aiming it, the power key (E) toggles it.
 -- aiming starts when the key is let go, so the click that picked the bore is over before the game binds
 -- its own target select, and the next click sets the target. shields are looked through
@@ -9713,12 +11117,12 @@ function main:start()
     end)
 end
 return main
-end function dote.z()local v=dote.cache.z if not v then v={c=__modImpl()}dote.cache.z=v end return v.c end end do local __modImpl=function()
+end function dote.E()local v=dote.cache.E if not v then v={c=__modImpl()}dote.cache.E=v end return v.c end end do local __modImpl=function()
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StructureUtil =
     require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Utilities"):WaitForChild("StructureUtil"))
 
-local utility = dote.n()
+local utility = dote.j()
 
 local main = {}
 main.__index = main
@@ -9771,15 +11175,15 @@ function main:start()
 end
 
 return main
-end function dote.A()local v=dote.cache.A if not v then v={c=__modImpl()}dote.cache.A=v end return v.c end end do local __modImpl=function()-- by nqjf and amedote
+end function dote.F()local v=dote.cache.F if not v then v={c=__modImpl()}dote.cache.F=v end return v.c end end do local __modImpl=function()-- by nqjf and amedote
 
 
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
-local container = dote.o()
-local utility = dote.n()
+local container = dote.t()
+local utility = dote.j()
 local GunClient = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Class"):WaitForChild("GunClient"))
 
 local main = {}
@@ -9893,14 +11297,14 @@ function main:update()
 end
 
 return main
-end function dote.B()local v=dote.cache.B if not v then v={c=__modImpl()}dote.cache.B=v end return v.c end end do local __modImpl=function()-- by nqjf
+end function dote.G()local v=dote.cache.G if not v then v={c=__modImpl()}dote.cache.G=v end return v.c end end do local __modImpl=function()-- by nqjf
 -- rewritten for 77ware by amedote
 
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
-local container = dote.o()
+local container = dote.t()
 
 local damageindicator = {}
 damageindicator.__index = damageindicator
@@ -9965,7 +11369,7 @@ function damageindicator:start()
 end
 
 return damageindicator
-end function dote.C()local v=dote.cache.C if not v then v={c=__modImpl()}dote.cache.C=v end return v.c end end do local __modImpl=function()-- CIELUV color interpolation by Fractality
+end function dote.H()local v=dote.cache.H if not v then v={c=__modImpl()}dote.cache.H=v end return v.c end end do local __modImpl=function()-- CIELUV color interpolation by Fractality
 -- vendored from https://pastebin.com/raw/wRnsJeid so the script doesn't download and run it on every load
 -- usage: local lerp = lerpColor(fromColor, toColor); lerp(0.5) -> Color3
 
@@ -10036,14 +11440,14 @@ local l0, u0, v0 = RgbToLuv13(c0)
 end
 
 return lerpColor
-end function dote.D()local v=dote.cache.D if not v then v={c=__modImpl()}dote.cache.D=v end return v.c end end do local __modImpl=function()-- by nqjf
+end function dote.I()local v=dote.cache.I if not v then v={c=__modImpl()}dote.cache.I=v end return v.c end end do local __modImpl=function()-- by nqjf
 
 
 local Players = game:GetService("Players")
 
-local container = dote.o()
-local utility = dote.n()
-local lerpColor = dote.D()
+local container = dote.t()
+local utility = dote.j()
+local lerpColor = dote.I()
 
 -- health bar colors precomputed per health percent, so the color lerp never runs per frame
 local HEALTH_COLORS = {}
@@ -10549,13 +11953,13 @@ and{localCharacter:FindFirstChild("HumanoidRootPart") or localCharacter.PrimaryP
 end
 
 return main
-end function dote.E()local v=dote.cache.E if not v then v={c=__modImpl()}dote.cache.E=v end return v.c end end do local __modImpl=function()-- by nqjf and amedote
+end function dote.J()local v=dote.cache.J if not v then v={c=__modImpl()}dote.cache.J=v end return v.c end end do local __modImpl=function()-- by nqjf and amedote
 -- draws the arc for the artillery we're operating; the drawing itself lives in arcrenderer
 
 
 local Players = game:GetService("Players")
 
-local ArcRenderer = dote.s()
+local ArcRenderer = dote.x()
 
 local ArtilleryArc = {}
 ArtilleryArc.__index = ArtilleryArc
@@ -10700,7 +12104,7 @@ function ArtilleryArc:destroy()
 end
 
 return ArtilleryArc
-end function dote.F()local v=dote.cache.F if not v then v={c=__modImpl()}dote.cache.F=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.K()local v=dote.cache.K if not v then v={c=__modImpl()}dote.cache.K=v end return v.c end end do local __modImpl=function()-- by amedote
 -- optimized for performance and low GC
 
 
@@ -10716,7 +12120,7 @@ local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local PlaceStructure = RS:WaitForChild("Shared"):WaitForChild("Remotes"):WaitForChild("PlaceStructure")
-local utility = dote.n()
+local utility = dote.j()
 
 local newCFrame = CFrame.new
 local angles = CFrame.Angles
@@ -10786,12 +12190,12 @@ function main:start(structure)
 end
 
 return main
-end function dote.G()local v=dote.cache.G if not v then v={c=__modImpl()}dote.cache.G=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.L()local v=dote.cache.L if not v then v={c=__modImpl()}dote.cache.L=v end return v.c end end do local __modImpl=function()-- by amedote
 
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
-local Util = dote.n()
+local Util = dote.j()
 
 local nextSize = 1
 local StructurePlaced=function(
@@ -10826,7 +12230,7 @@ if not Toggles.AutoShield.Value then return end
 end
 
 return StructurePlaced
-end function dote.H()local v=dote.cache.H if not v then v={c=__modImpl()}dote.cache.H=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.M()local v=dote.cache.M if not v then v={c=__modImpl()}dote.cache.M=v end return v.c end end do local __modImpl=function()-- by amedote
 -- todo: instead of using 252 as heightlimit grab it from the server config
 -- todo: fade distance and other customizability options ( they are alr implemented just needs to be fixed in the gui file )
 
@@ -10836,7 +12240,7 @@ end function dote.H()local v=dote.cache.H if not v then v={c=__modImpl()}dote.ca
 
 local Players = game:GetService("Players")
 
-local utility = dote.n()
+local utility = dote.j()
 
 local HEIGHT_LIMIT = 252
 local FADE_DISTANCE = 15
@@ -10941,7 +12345,7 @@ function main:update()
 end
 
 return main
-end function dote.I()local v=dote.cache.I if not v then v={c=__modImpl()}dote.cache.I=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.N()local v=dote.cache.N if not v then v={c=__modImpl()}dote.cache.N=v end return v.c end end do local __modImpl=function()-- by amedote
 
 local main = {}
 main.__index = main
@@ -10986,7 +12390,7 @@ function main:unload()
 end
 
 return main
-end function dote.J()local v=dote.cache.J if not v then v={c=__modImpl()}dote.cache.J=v end return v.c end end do local __modImpl=function()--core/boreaimbot.luau
+end function dote.O()local v=dote.cache.O if not v then v={c=__modImpl()}dote.cache.O=v end return v.c end end do local __modImpl=function()--core/boreaimbot.luau
 --by amedote
 
 
@@ -10994,7 +12398,7 @@ local Players = game:GetService('Players')
 local Client = Players.LocalPlayer
 local Mouse = Client:GetMouse()
 
-local utility = dote.n()
+local utility = dote.j()
 
 local main = {}
 main.__index = main
@@ -11101,10 +12505,10 @@ function main:start()
 end
 
 return main
-end function dote.K()local v=dote.cache.K if not v then v={c=__modImpl()}dote.cache.K=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.P()local v=dote.cache.P if not v then v={c=__modImpl()}dote.cache.P=v end return v.c end end do local __modImpl=function()-- by amedote
 
 
-local utility = dote.n()
+local utility = dote.j()
 
 local DEFAULT_COLOR = Color3.fromRGB(0, 255, 255)
 
@@ -11114,7 +12518,11 @@ local CHARGE_START = Color3.fromRGB(0, 255, 255)
 local CHARGE_END = Color3.fromRGB(0, 0, 255)
 
 local STRUCTURES = workspace.Structures
-local Client = game:GetService("Players").LocalPlayer
+local Players = game:GetService("Players")
+local Client = Players.LocalPlayer
+
+-- cosmetic sync, for the beam and flare colors other EclX users picked; set by start
+local sync = nil
 
 local main = {}
 main.__index = main
@@ -11126,13 +12534,57 @@ end local quantize=function(
 
 color)    
 return Color3.fromRGB(math.round(color.R * 255), math.round(color.G * 255), math.round(color.B * 255))
+end local colorOf=function(
+
+hex)    
+if typeof(hex) ~= "string" then
+        return nil
+    end
+    local ok, color = pcall(Color3.fromHex, hex)
+    return (ok and{color }or{nil
+})[1]end local colorerOf=function(
+
+
+
+bore)    
+local aimer = bore:GetAttribute("EnablingUserId")
+    if aimer ~= nil then
+        if aimer == Client.UserId then
+            return "own"
+        end
+        local player = sync and Players:GetPlayerByUserId(aimer)
+        return player and sync:cosmeticsOf(player)
+    end
+    local builder = bore:GetAttribute("Builder")
+    if builder == Client.Name then
+        return "own"
+    end
+    local player = sync and builder and Players:FindFirstChild(builder)
+    return player and player:IsA("Player") and sync:cosmeticsOf(player)
 end
--- beam part -> { charge, written }; weak so parts of removed bores fall out on their own
+-- beam part -> { charge, written, bore }; weak so parts of removed bores fall out on their own
 
 local beamStates = setmetatable({}, { __mode = "k" })
-local applyBeamPart=function(
+local beamColors=function(
+
+bore)    
+local colorer = colorerOf(bore)
+    if colorer == "own" then
+        if Toggles.BoreBeamColorChange.Value then
+            return Options.BoreBeamColor.Value, Options.BoreBeamColorCharged.Value
+        end
+        return nil
+    end
+    local from = colorer and colorOf(colorer.boreBeamColor)
+    if from then
+        return from, colorOf(colorer.boreBeamColorCharged) or from
+    end
+    return nil
+end local applyBeamPart=function(
+
 part, state)    
-if not Toggles.BoreBeamColorChange.Value then
+local from, to = beamColors(state.bore)
+    if not from then
         -- hand the part back to the server's colors, once
         if state.written then
             state.written = nil
@@ -11141,19 +12593,19 @@ if not Toggles.BoreBeamColorChange.Value then
         return
     end
 
-    local color = quantize(Options.BoreBeamColor.Value:Lerp(Options.BoreBeamColorCharged.Value, state.charge))
+    local color = quantize(from:Lerp(to, state.charge))
     state.written = color
     if part.Color ~= color then
         part.Color = color
     end
 end local watchBeamPart=function(
 
-part)    
+part, bore)    
 if beamStates[part] or not part:IsA("BasePart") then
         return
     end
 
-    local state = { charge = chargeOf(part.Color), written = nil }
+    local state = { charge = chargeOf(part.Color), written = nil, bore = bore }
     beamStates[part] = state
 
     part:GetPropertyChangedSignal("Color"):Connect(function()
@@ -11177,11 +12629,11 @@ for part, state in beamStates do
 end
 -- flares: every FakeBarrel in the tilt assembly has a FlareEmitterPart holding a FlareEmitter
 -- (ParticleEmitter, ColorSequence) and a Light (single Color3)
--- flare instance -> { original }; original is the game's color, put back when the toggle is off
+-- flare instance -> { original, bore }; original is the game's color, put back when nobody's colors apply
 
 local flareStates = setmetatable({}, { __mode = "k" })
 
--- what flares are forced to while the toggle is on, rebuilt only when the options change
+-- what flares on bores we aimed are forced to while the toggle is on, rebuilt only when the options change
 local flareSequence = nil
 local flareLightColor = nil
 local refreshFlareColors=function()    
@@ -11203,37 +12655,57 @@ if instance:IsA("ParticleEmitter") then
     return instance:IsA("Light") and instance.Parent ~= nil and instance.Parent.Name == "FlareEmitterPart"
 end local wantedFlareColor=function(
 
-instance)    
-return (instance:IsA("ParticleEmitter") and{flareSequence }or{flareLightColor
+
+instance, bore)    
+local colorer = colorerOf(bore)
+    local sequence, lightColor
+    if colorer == "own" then
+        sequence, lightColor = flareSequence, flareLightColor
+    else
+        local one = colorer and colorOf(colorer.boreFlareColor)
+        if one then
+            sequence = ColorSequence.new(one, colorOf(colorer.boreFlareColor2) or one)
+            lightColor = one
+        end
+    end
+    if not sequence then
+        return nil
+    end
+    return (instance:IsA("ParticleEmitter") and{sequence }or{lightColor
 })[1]end local applyFlare=function(
 
 instance, state)    
-local wanted = (flareSequence and{(wantedFlareColor(instance) )}or{(state.original
-)})[1]    if instance.Color ~= wanted then
+local wanted = wantedFlareColor(instance, state.bore) or state.original
+    if instance.Color ~= wanted then
+        state.writing = true
         instance.Color = wanted
+        state.writing = false
     end
 end local watchFlare=function(
 
-instance)    
+instance, bore)    
 if flareStates[instance] or not isFlare(instance) then
         return
     end
 
-    local state = { original = instance.Color }
+    local state = { original = instance.Color, bore = bore }
     flareStates[instance] = state
 
     instance:GetPropertyChangedSignal("Color"):Connect(function()
-        if not flareSequence then
-            -- toggle is off: whatever the game sets is the color to come back to
+        if state.writing then
+            return
+        end
+        local wanted = wantedFlareColor(instance, bore)
+        if not wanted then
+            -- nobody's colors apply: whatever the game sets is the color to come back to
             state.original = instance.Color
             return
         end
 
-        local wanted = wantedFlareColor(instance)
         if instance.Color ~= wanted then
             -- the game recolored it; remember that for later and put ours back
             state.original = instance.Color
-            instance.Color = wanted
+            applyFlare(instance, state)
         end
     end)
 
@@ -11245,7 +12717,8 @@ refreshFlareColors()
     for instance, state in flareStates do
         applyFlare(instance, state)
     end
-end local watchBoreBeam=function(
+end local watchBore=function(
+
 
 bore)    
 local tiltAssembly = bore:WaitForChild("TiltAssembly", 5)
@@ -11253,10 +12726,25 @@ local tiltAssembly = bore:WaitForChild("TiltAssembly", 5)
         return
     end
 
+    bore:GetAttributeChangedSignal("EnablingUserId"):Connect(function()
+        for part, state in beamStates do
+            if state.bore == bore then
+                applyBeamPart(part, state)
+            end
+        end
+        for instance, state in flareStates do
+            if state.bore == bore then
+                applyFlare(instance, state)
+            end
+        end
+    end)
+
     for _, descendant in tiltAssembly:GetDescendants() do
-        watchFlare(descendant)
+        watchFlare(descendant, bore)
     end
-    tiltAssembly.DescendantAdded:Connect(watchFlare)
+    tiltAssembly.DescendantAdded:Connect(function(descendant)
+        watchFlare(descendant, bore)
+    end)
 
     local beamParts = tiltAssembly:WaitForChild("BeamParts", 5)
     if not beamParts then
@@ -11264,9 +12752,11 @@ local tiltAssembly = bore:WaitForChild("TiltAssembly", 5)
     end
 
     for _, part in beamParts:GetChildren() do
-        watchBeamPart(part)
+        watchBeamPart(part, bore)
     end
-    beamParts.ChildAdded:Connect(watchBeamPart)
+    beamParts.ChildAdded:Connect(function(part)
+        watchBeamPart(part, bore)
+    end)
 end local applyColor=function(
 
 Bores)    
@@ -11301,30 +12791,38 @@ for _, Bore in ipairs(Bores) do
         end
     end
 end
+-- sync (optional): cosmetic sync, for other EclX users' own beam and flare colors
 
-function main.new()
+function main.new(sync)
     return setmetatable({
-        Bores = {}
+        Bores = {},
+        sync = sync,
     }, main)
 end
 
 function main:start()
     local Bores = self.Bores
+    sync = self.sync
 
     refreshFlareColors()
 
-    -- only bores we placed are tracked, so only their beams get recolored
+    -- the beam and flare colors follow whoever aimed each bore (see colorerOf). the preview beam and neon
+    -- are only put on bores we placed
     for _, Child in ipairs(STRUCTURES:GetChildren()) do
-        if Child.Name == "Bore" and Child:GetAttribute("Builder") == Client.Name then
-            table.insert(Bores, Child)
-            task.spawn(watchBoreBeam, Child)
+        if Child.Name == "Bore" then
+            task.spawn(watchBore, Child)
+            if Child:GetAttribute("Builder") == Client.Name then
+                table.insert(Bores, Child)
+            end
         end
     end
 
     STRUCTURES.ChildAdded:Connect(function(Child)
+        if Child.Name == "Bore" then
+            task.spawn(watchBore, Child)
+        end
         if Child.Name == "Bore" and Child:GetAttribute("Builder") == Client.Name then
             table.insert(Bores, Child)
-            task.spawn(watchBoreBeam, Child)
 
             task.wait(0.1)
             applyColor({ Child })
@@ -11359,6 +12857,12 @@ function main:start()
     Toggles.BoreBeamColorChange:OnChanged(applyAllBeamParts)
     Options.BoreBeamColor:OnChanged(applyAllBeamParts)
     Options.BoreBeamColorCharged:OnChanged(applyAllBeamParts)
+    if sync then
+        sync.changed:Connect(function()
+            applyAllBeamParts()
+            applyAllFlares()
+        end)
+    end
 
     Toggles.BoreFlareColors:OnChanged(applyAllFlares)
     Options.BoreFlareColorOne:OnChanged(applyAllFlares)
@@ -11366,8 +12870,8 @@ function main:start()
 end
 
 return main
-end function dote.L()local v=dote.cache.L if not v then v={c=__modImpl()}dote.cache.L=v end return v.c end end do local __modImpl=function()
-local utility = dote.n()
+end function dote.Q()local v=dote.cache.Q if not v then v={c=__modImpl()}dote.cache.Q=v end return v.c end end do local __modImpl=function()
+local utility = dote.j()
 
 local main = {}
 main.__index = main
@@ -11435,7 +12939,7 @@ function main:start()
 end
 
 return main
-end function dote.M()local v=dote.cache.M if not v then v={c=__modImpl()}dote.cache.M=v end return v.c end end do local __modImpl=function()-- by unknown
+end function dote.R()local v=dote.cache.R if not v then v={c=__modImpl()}dote.cache.R=v end return v.c end end do local __modImpl=function()-- by unknown
 
 
 local Players = game:GetService("Players")
@@ -11520,7 +13024,7 @@ function Player.SetFallDamage(IsFallDamage)
 end 
 
 return Player
-end function dote.N()local v=dote.cache.N if not v then v={c=__modImpl()}dote.cache.N=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.S()local v=dote.cache.S if not v then v={c=__modImpl()}dote.cache.S=v end return v.c end end do local __modImpl=function()-- by amedote
 -- chams: draws clones of models in a full-screen ViewportFrame laid over the world, so the actual
 -- model (colors, materials) shows through walls. the viewport camera copies the game camera each frame.
 -- usage: local chams = Chams.new(fadedNames); chams:setModels(set); chams:update(transparency, fadedTransparency); chams:hide()
@@ -11710,7 +13214,7 @@ function Chams:hide()
 end
 
 return Chams
-end function dote.O()local v=dote.cache.O if not v then v={c=__modImpl()}dote.cache.O=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.T()local v=dote.cache.T if not v then v={c=__modImpl()}dote.cache.T=v end return v.c end end do local __modImpl=function()-- by amedote
 -- ls silent aim: while held with a laser strike equipped, redirects the strike onto the enemy player
 -- or weak enemy structure closest to the mouse inside the fov circle and within ls range.
 -- the target is highlighted through walls, and every other structure in the fov gets chams
@@ -11720,10 +13224,10 @@ local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
-local container = dote.o()
-local utility = dote.n()
-local orbital = dote.p()
-local Chams = dote.O()
+local container = dote.t()
+local utility = dote.j()
+local orbital = dote.u()
+local Chams = dote.T()
 local GunClient = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Class"):WaitForChild("GunClient"))
 
 local LocalPlayer = Players.LocalPlayer
@@ -12047,13 +13551,13 @@ function main:update()
 end
 
 return main
-end function dote.P()local v=dote.cache.P if not v then v={c=__modImpl()}dote.cache.P=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.U()local v=dote.cache.U if not v then v={c=__modImpl()}dote.cache.U=v end return v.c end end do local __modImpl=function()-- by amedote
 -- shows where an equipped orbital shield / laser strike will land, red when it's out of range.
 -- built from handle adornments so raycasts, Mouse.Hit and the placement system never see them
 
 
-local utility = dote.n()
-local orbital = dote.p()
+local utility = dote.j()
+local orbital = dote.u()
 
 local OUT_OF_RANGE_COLOR = Color3.fromRGB(255, 0, 0)
 
@@ -12181,15 +13685,15 @@ _, toolName =orbital.getEquippedOrbital()
 end
 
 return main
-end function dote.Q()local v=dote.cache.Q if not v then v={c=__modImpl()}dote.cache.Q=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.V()local v=dote.cache.V if not v then v={c=__modImpl()}dote.cache.V=v end return v.c end end do local __modImpl=function()-- by amedote
 -- stop orbital error: firing a laser strike / orbital shield outside its use range puts it on
 -- cooldown, so block the activation when the landing point is out of range.
 -- the range is checked every frame while the tool is held (the same check the visualizers draw);
 -- at activation the game is already tearing the tool down, so checking right then isn't reliable
 
 
-local utility = dote.n()
-local orbital = dote.p()
+local utility = dote.j()
+local orbital = dote.u()
 
 -- how old the last range check may be when the tool fires
 local STATE_MAX_AGE = 0.5
@@ -12250,14 +13754,14 @@ local _, toolName =orbital.getEquippedOrbital()
 end
 
 return main
-end function dote.R()local v=dote.cache.R if not v then v={c=__modImpl()}dote.cache.R=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.W()local v=dote.cache.W if not v then v={c=__modImpl()}dote.cache.W=v end return v.c end end do local __modImpl=function()-- by amedote
 -- trajectories for artillery other players are sitting in, colored by team. the arc stays up for a
 -- few seconds after they get off, so you don't lose it the moment they hop out
 
 
 local Players = game:GetService("Players")
 
-local ArcRenderer = dote.s()
+local ArcRenderer = dote.x()
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -12379,15 +13883,15 @@ function main:update()
 end
 
 return main
-end function dote.S()local v=dote.cache.S if not v then v={c=__modImpl()}dote.cache.S=v end return v.c end end do local __modImpl=function()-- by amedote
+end function dote.X()local v=dote.cache.X if not v then v={c=__modImpl()}dote.cache.X=v end return v.c end end do local __modImpl=function()-- by amedote
 -- ls threat rings: a ring around every enemy holding a laser strike, the size of its use range,
 -- so you can see who can hit you and where. their actual aim never reaches other clients
 
 
 local Players = game:GetService("Players")
 
-local utility = dote.n()
-local orbital = dote.p()
+local utility = dote.j()
+local orbital = dote.u()
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -12484,7 +13988,7 @@ function main:update()
 end
 
 return main
-end function dote.T()local v=dote.cache.T if not v then v={c=__modImpl()}dote.cache.T=v end return v.c end end do local __modImpl=function()-- the portafab tool: finding it every life, requiring its placement modules and finding the controller
+end function dote.Y()local v=dote.cache.Y if not v then v={c=__modImpl()}dote.cache.Y=v end return v.c end end do local __modImpl=function()-- the portafab tool: finding it every life, requiring its placement modules and finding the controller
 -- object that runs it, for the features that hook or drive placement. sandbox servers also hand out a
 -- "Prototyper" built on the same StructurePlacer; its ghost gets hooked too, but it has its own client
 -- script with no controller to drive, so quick build / keep placing use the Portafab.
@@ -12714,15 +14218,15 @@ return {
     equip = equip,
     startPlacing = startPlacing,
 }
-end function dote.U()local v=dote.cache.U if not v then v={c=__modImpl()}dote.cache.U=v end return v.c end end do local __modImpl=function()-- place anyway: lets the portafab place a structure where its ghost shows red.
+end function dote.Z()local v=dote.cache.Z if not v then v={c=__modImpl()}dote.cache.Z=v end return v.c end end do local __modImpl=function()-- place anyway: lets the portafab place a structure where its ghost shows red.
 -- the portafab's Dragger works out the placement every frame in Dragger.update and only sets
 -- Dragger.canPlace when the spot passes its checks; StructurePlacer:confirmPlacement places nothing
 -- unless that flag is set. wrapping update to set it after the game's own check is enough, and the
 -- ghost is tinted teal so you can see it will go through. each life's portafab gets its own Dragger
 
 
-local portafab = dote.U()
-local utility = dote.n()
+local portafab = dote.Z()
+local utility = dote.j()
 
 local PLACEABLE_COLOR = BrickColor.new("Teal")
 
@@ -12778,16 +14282,16 @@ function main:start()
 end
 
 return main
-end function dote.V()local v=dote.cache.V if not v then v={c=__modImpl()}dote.cache.V=v end return v.c end end do local __modImpl=function()-- keep placing: after a portafab placement goes through, go straight back to placing the same structure
+end function dote._()local v=dote.cache._ if not v then v={c=__modImpl()}dote.cache._=v end return v.c end end do local __modImpl=function()-- keep placing: after a portafab placement goes through, go straight back to placing the same structure
 -- turned the same way, until you cancel with E.
 -- quick build: keybinds that start placing a chosen structure, equipping the portafab first if it isn't
 -- out. both go through the portafab's own controller (see portafab.startPlacing), so rotate / cancel /
 -- snap behave as they do from the menu. slots are fired through container.quickBuildCall
 
 
-local portafab = dote.U()
-local utility = dote.n()
-local container = dote.o()
+local portafab = dote.Z()
+local utility = dote.j()
+local container = dote.t()
 
 local main = {}
 main.__index = main
@@ -12819,7 +14323,9 @@ function main:_hook(tool)
         local name, rotation = current, snapping.rotation
         local placed = oldConfirm(placerSelf, ...)
 
-        if placed and name and Toggles["PORTAFAB/KeepPlacing"].Value then
+        -- structures on the blacklist end placement like normal
+        local blacklisted = Options["PORTAFAB/KeepPlacingBlacklist"].Value[name]
+        if placed and name and Toggles["PORTAFAB/KeepPlacing"].Value and not blacklisted then
             -- the controller ends placement right after this returns, so start again once it has
             task.defer(function()
                 if portafab.isEquipped(tool) then
@@ -12883,7 +14389,7 @@ function main:start()
 end
 
 return main
-end function dote.W()local v=dote.cache.W if not v then v={c=__modImpl()}dote.cache.W=v end return v.c end end do local __modImpl=function()-- fast placement: fixes the hitch the game itself has every time a portafab ghost is made.
+end function dote.aa()local v=dote.cache.aa if not v then v={c=__modImpl()}dote.cache.aa=v end return v.c end end do local __modImpl=function()-- fast placement: fixes the hitch the game itself has every time a portafab ghost is made.
 -- the game's Dragger.setModel re-tags every SnapPart in the world (each flange and snap point of every
 -- structure, ~18k in a built-up match) with RayIgnore, one AddTag call each, though almost all of them
 -- already have it. this is the same setModel with that loop reduced to the parts whose tag can differ,
@@ -12894,8 +14400,8 @@ end function dote.W()local v=dote.cache.W if not v then v={c=__modImpl()}dote.ca
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
 
-local portafab = dote.U()
-local utility = dote.n()
+local portafab = dote.Z()
+local utility = dote.j()
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ModelUtility = require(Shared:WaitForChild("Utilities"):WaitForChild("ModelUtility"))
@@ -13079,7 +14585,7 @@ function main:start()
 end
 
 return main
-end function dote.X()local v=dote.cache.X if not v then v={c=__modImpl()}dote.cache.X=v end return v.c end end do local __modImpl=function()-- gun mods for the hitscan guns (SMG, Pistol...), which all run on GunHitscanClient:
+end function dote.ab()local v=dote.cache.ab if not v then v={c=__modImpl()}dote.cache.ab=v end return v.c end end do local __modImpl=function()-- gun mods for the hitscan guns (SMG, Pistol...), which all run on GunHitscanClient:
 --   no sprint check   IsSprinting (the character's Sprinting attribute) always reads false, so you can
 --                     fire while sprinting
 --   no iridium usage  HasIridium always passes and ConsumeIridium does nothing. the gun is what tells the
@@ -13089,7 +14595,7 @@ end function dote.X()local v=dote.cache.X if not v then v={c=__modImpl()}dote.ca
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local utility = dote.n()
+local utility = dote.j()
 
 local main = {}
 main.__index = main
@@ -13136,7 +14642,7 @@ function main:start()
 end
 
 return main
-end function dote.Y()local v=dote.cache.Y if not v then v={c=__modImpl()}dote.cache.Y=v end return v.c end end do local __modImpl=function()-- rocket silent aim: the rocket lands where you click instead of falling short.
+end function dote.ac()local v=dote.cache.ac if not v then v={c=__modImpl()}dote.cache.ac=v end return v.c end end do local __modImpl=function()-- rocket silent aim: the rocket lands where you click instead of falling short.
 -- the rocket launcher reports where it's aimed every frame (Remote "TargetingUpdated" with the part, the
 -- point and the normal under the mouse, next to "BarrelPositionUpdated"), and the server fires the rocket
 -- from the barrel straight at the last point it was told. rockets fly at a steady ROCKET_SPEED and drop
@@ -13149,7 +14655,7 @@ end function dote.Y()local v=dote.cache.Y if not v then v={c=__modImpl()}dote.ca
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 
-local utility = dote.n()
+local utility = dote.j()
 local theme = dote.b()
 
 local ROCKET_SPEED = 80
@@ -13450,7 +14956,7 @@ function main:update()
 end
 
 return main
-end function dote.Z()local v=dote.cache.Z if not v then v={c=__modImpl()}dote.cache.Z=v end return v.c end end do local __modImpl=function()-- spawn esp, loosely after the scanner's spawn markers: a small diamond over each spawn in its team's
+end function dote.ad()local v=dote.cache.ad if not v then v={c=__modImpl()}dote.cache.ad=v end return v.c end end do local __modImpl=function()-- spawn esp, loosely after the scanner's spawn markers: a small diamond over each spawn in its team's
 -- color with the spawn number beside it. only spawns with enough iridium to teleport to (140) are shown;
 -- a filled diamond also has enough to spawn on (280), a hollow one is teleport only.
 -- kept out of the way on purpose:
@@ -13468,7 +14974,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Teams = game:GetService("Teams")
 local UserInputService = game:GetService("UserInputService")
 
-local container = dote.o()
+local container = dote.t()
 
 local SpawnPointController =
     require(ReplicatedStorage:WaitForChild("Client"):WaitForChild("Loader"):WaitForChild("SpawnPointController"))
@@ -13776,126 +15282,15 @@ end
 end
 
 return main
-end function dote._()local v=dote.cache._ if not v then v={c=__modImpl()}dote.cache._=v end return v.c end end do local __modImpl=function()-- holds instance properties at our own values and puts the game's back when let go.
--- if the game changes a held property (a map's lighting loading in, a structure recoloring itself), its
--- new value is what gets restored later and ours goes straight back on, so nothing flickers.
--- usage: local held = override.new(); held:set(Lighting, "ClockTime", 14); held:release(Lighting, "ClockTime")
-
-
-local override = {}
-override.__index = override
-
-function override.new()
-    return setmetatable({
-        entries = {}, -- instance -> { props = { property -> prop }, ancestry = connection }
-    }, override)
-end
-local write=function(
-
-instance, property, prop)    
-prop.writing = true
-    instance[property] = prop.value
-    prop.writing = false
-    prop.applied = instance[property]
-end
--- drops an instance without writing to it, for when it has left the game
-
-function override:_forget(instance)
-    local entry = self.entries[instance]
-    if not entry then
-        return
-    end
-    self.entries[instance] = nil
-    entry.ancestry:Disconnect()
-    for _, prop in entry.props do
-        prop.connection:Disconnect()
-    end
-end
-
-function override:set(instance, property, value)
-    local entry = self.entries[instance]
-    if not entry then
-        entry = { props = {} }
-        -- streamed out or destroyed: nothing left to restore
-        entry.ancestry = instance.AncestryChanged:Connect(function(_, parent)
-            if parent == nil then
-                self:_forget(instance)
-            end
-        end)
-        self.entries[instance] = entry
-    end
-
-    local prop = entry.props[property]
-    if not prop then
-        prop = { original = instance[property] }
-        prop.connection = instance:GetPropertyChangedSignal(property):Connect(function()
-            -- our own write: with immediate signals it lands here mid-write, with deferred ones later,
-            -- compared with what the property read back as (the engine stores some values at lower
-            -- precision than the number we gave it)
-            local current = instance[property]
-            if prop.writing or current == prop.applied then
-                return
-            end
-            prop.original = current
-            write(instance, property, prop)
-        end)
-        entry.props[property] = prop
-    end
-
-    prop.value = value
-    write(instance, property, prop)
-end
-
--- puts the game's value back
-function override:release(instance, property)
-    local entry = self.entries[instance]
-    local prop = entry and entry.props[property]
-    if not prop then
-        return
-    end
-
-    prop.connection:Disconnect()
-    entry.props[property] = nil
-    instance[property] = prop.original
-
-    if next(entry.props) == nil then
-        entry.ancestry:Disconnect()
-        self.entries[instance] = nil
-    end
-end
-
--- the game's value: what release would put back, or the current value if it isn't held
-function override:original(instance, property)
-    local entry = self.entries[instance]
-    local prop = entry and entry.props[property]
-    if prop then
-        return prop.original
-    end
-    return instance[property]
-end
-
-function override:isHeld(instance, property)
-    local entry = self.entries[instance]
-    return entry ~= nil and entry.props[property] ~= nil
-end
-
-function override:releaseAll()
-    for instance, entry in self.entries do
-        for property in entry.props do
-            self:release(instance, property)
-        end
-    end
-end
-
-return override
-end function dote.aa()local v=dote.cache.aa if not v then v={c=__modImpl()}dote.cache.aa=v end return v.c end end do local __modImpl=function()-- recolors iridium: the glowing meter in every tank (structures and the one on each player's back) and
--- the crystals on the map, along with the light each one gives off. a crystal's body is drawn darker
+end function dote.ae()local v=dote.cache.ae if not v then v={c=__modImpl()}dote.cache.ae=v end return v.c end end do local __modImpl=function()-- recolors iridium: the glowing meter in every tank (structures and the one on each player's back), the
+-- crystals on the map, along with the light each one gives off, and the iridium sea (its surface,
+-- Effects.LakeTop.LakeTopPart, and the particles rising off it from Effects.LakeEmitter). a crystal's body is drawn darker
 -- than its glow (the game's is about 60% as bright: cyan glow, teal body), by the Crystal Body Shade
 -- slider. Glow Brightness scales the game's own light brightness. nothing is watched while both are
 -- off, and turning one off puts the game's colors and lights back
 
 
-local override = dote.aa()
+local override = dote.m()
 local shaded=function(
 color, shade)    
 if shade == 1 then
@@ -13929,6 +15324,23 @@ local parent = instance.Parent
     end
     return nil
 end
+-- the sea's surface, and its two particle emitters (the blue one is darker in the game too)
+
+local SEA_EMITTERS = { VaporizationEmitter = 1, BlueParticles = 0.7 }
+local seaShade=function(
+instance)    
+local parent = instance.Parent
+    if not parent then
+        return nil
+    end
+    if instance.Name == "LakeTopPart" and parent.Name == "LakeTop" and instance:IsA("BasePart") then
+        return 1
+    end
+    if parent.Name == "LakeEmitter" and instance:IsA("ParticleEmitter") then
+        return SEA_EMITTERS[instance.Name]
+    end
+    return nil
+end
 
 local main = {}
 main.__index = main
@@ -13947,7 +15359,8 @@ local shade = shadeOf(instance)
         if not shade then
             return
         end
-        held:set(instance, "Color", shaded(Options[colorName].Value, shade))
+        local color = shaded(Options[colorName].Value, shade)
+        held:set(instance, "Color", (instance:IsA("ParticleEmitter") and{(ColorSequence.new(color) )}or{color})[1])
 
         if instance:IsA("Light") then
             local glow = Options["IridiumColors/GlowBrightness"].Value
@@ -14008,10 +15421,14 @@ function main:start()
     group("IridiumColors/Crystals", "IridiumColors/CrystalColor", function()
         return workspace:FindFirstChild("Resources")
     end, crystalShade)
+
+    group("IridiumColors/Sea", "IridiumColors/SeaColor", function()
+        return workspace:FindFirstChild("Effects")
+    end, seaShade)
 end
 
 return main
-end function dote.ab()local v=dote.cache.ab if not v then v={c=__modImpl()}dote.cache.ab=v end return v.c end end do local __modImpl=function()-- no fog, daytime and the lighting options in Colors. the game's fog is an Atmosphere in Lighting (plus
+end function dote.af()local v=dote.cache.af if not v then v={c=__modImpl()}dote.cache.af=v end return v.c end end do local __modImpl=function()-- no fog, daytime and the lighting options in Colors. the game's fog is an Atmosphere in Lighting (plus
 -- the classic fog range), and its night is just the clock. Lighting properties are held through override,
 -- so turning an option off puts the game's own values back, including any the game set while it was on.
 -- color correction and bloom are our own effects on the camera, layered over the game's, so the game's
@@ -14020,9 +15437,12 @@ end function dote.ab()local v=dote.cache.ab if not v then v={c=__modImpl()}dote.
 
 local Lighting = game:GetService("Lighting")
 
-local override = dote.aa()
+local override = dote.m()
+local utility = dote.j()
 
 local NO_FOG_RANGE = 1e6
+
+local SKY_FACES = { SkyboxBk = "bk", SkyboxDn = "dn", SkyboxFt = "ft", SkyboxLf = "lf", SkyboxRt = "rt", SkyboxUp = "up" }
 
 local world = {}
 world.__index = world
@@ -14121,6 +15541,42 @@ function world:_applyEffects()
     self:_applyEffect("bloom", "BloomEffect", "Lighting/Bloom", BLOOM)
 end
 
+-- the skybox: the classic roblox sky, or one picture on every face. the game's Sky is held through
+-- override; with no Sky in Lighting we bring our own and take it away again
+function world:_applySky()
+    local held = self.held
+    local on = Toggles["Sky/Custom"].Value
+    local sky = Lighting:FindFirstChildOfClass("Sky")
+
+    if not on then
+        if sky then
+            for face in SKY_FACES do
+                held:release(sky, face)
+            end
+            held:release(sky, "CelestialBodiesShown")
+            held:release(sky, "StarCount")
+        end
+        if self.ownSky then
+            self.ownSky:Destroy()
+            self.ownSky = nil
+        end
+        return
+    end
+
+    if not sky then
+        sky = Instance.new("Sky")
+        self.ownSky = sky
+        sky.Parent = Lighting
+    end
+
+    local custom = Options["Sky/Preset"].Value == "Custom Image" and utility.imageContent(Options["Sky/ImageId"].Value)
+    for face, suffix in SKY_FACES do
+        held:set(sky, face, custom or string.format('rbxasset://textures/sky/sky512_%s.tex', tostring(suffix)))
+    end
+    held:set(sky, "CelestialBodiesShown", not Toggles["Sky/HideSunMoon"].Value)
+    held:set(sky, "StarCount", Options["Sky/Stars"].Value)
+end
+
 function world:_applyTime()
     if Toggles["World/Daytime"].Value then
         self.held:set(Lighting, "ClockTime", Options["World/ClockTime"].Value)
@@ -14168,13 +15624,21 @@ listen({ "Lighting/Custom", "Lighting/Ambient", "Lighting/OutdoorAmbient", "Ligh
     listen(effectOptions, function()
         self:_applyEffects()
     end)
+    listen({ "Sky/Custom", "Sky/Preset", "Sky/ImageId", "Sky/HideSunMoon", "Sky/Stars" }, function()
+        self:_applySky()
+    end)
+
     -- a new camera would leave our effects behind
     workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
         self:_applyEffects()
     end)
 
-    -- a map can bring its own atmosphere
+    -- a map can bring its own atmosphere or sky
     Lighting.ChildAdded:Connect(function(child)
+        if child:IsA("Sky") and child ~= self.ownSky and Toggles["Sky/Custom"].Value then
+            task.defer(self._applySky, self)
+            return
+        end
         if not child:IsA("Atmosphere") then
             return
         end
@@ -14190,10 +15654,1277 @@ listen({ "Lighting/Custom", "Lighting/Ambient", "Lighting/OutdoorAmbient", "Ligh
     self:_applyTime()
     self:_applyLighting()
     self:_applyEffects()
+    self:_applySky()
 end
 
 return world
-end function dote.ac()local v=dote.cache.ac if not v then v={c=__modImpl()}dote.cache.ac=v end return v.c end end end-- EclX client for Eclipsis
+end function dote.ag()local v=dote.cache.ag if not v then v={c=__modImpl()}dote.cache.ag=v end return v.c end end do local __modImpl=function()-- custom gun tracers. every hitscan shot (yours and everyone else's) drops a neon streak into
+-- workspace.Effects (see utility.onShotPlaced): it spans muzzle to hit once it's placed, then shrinks
+-- toward the hit and is gone ~0.03s later. this recolors and resizes that streak, and can draw a lasting
+-- line over the shot's full path that fades out over Tracer Duration.
+-- the impact sparks (an Effects.HitParticle with BlueHitParticles / WhiteHitJet emitters) and the muzzle
+-- flash (each gun's Handle.FlareEmitterPart: a FlareEmitter and a Light) can be recolored too.
+-- the portafab's build beam is the same kind of streak; it's left as the game draws it.
+-- with cosmetic sync on, another EclX user's shots, impacts and muzzle flashes take the colors they picked.
+-- an impact can come in before or after its shot is placed, so whichever is second looks for the other.
+-- neon makes the streak and lines glow in the dark. fog still covers neon, so Draw Over Fog draws the
+-- lasting lines on the screen instead (Drawing lines, projected every frame), which fog, night and walls
+-- can't hide.
+-- streaks and sparks are only touched as they're made, and the muzzle flashes are held through override,
+-- so turning anything off leaves the game's own look
+
+
+local Players = game:GetService("Players")
+
+local override = dote.m()
+local utility = dote.j()
+
+local IMPACT_EMITTERS = { BlueHitParticles = true, WhiteHitJet = true }
+-- their beams are shot streaks too, but they're building, not shooting
+local BUILD_TOOLS = { Portafab = true, Prototyper = true }
+local OVERLAY_MIN_DURATION = 0.15
+-- screen lines are clipped this far in front of the camera, so a shot passing beside you still draws
+local NEAR_PLANE = 0.5
+-- an impact belongs to a shot whose hit end is this close, this soon
+local IMPACT_MATCH_RANGE = 4
+local IMPACT_MATCH_TIME = 0.5
+
+local LocalPlayer = Players.LocalPlayer
+
+local main = {}
+main.__index = main
+
+-- sync (optional): cosmetic sync, for other EclX users' own tracer colors
+function main.new(sync)
+    return setmetatable({
+        sync = sync,
+        lines = {}, -- { part, born, duration, opacity }
+        folder = nil,
+        flashes = override.new(),
+        guns = {}, -- tools in characters -> their player
+        syncedShots = {}, -- { point, color, time }: recent shots by synced players, waiting for their impact
+        impacts = {}, -- { part, point, time }: recent impacts, waiting for a synced shot
+    }, main)
+end
+local colorOf=function(
+
+hex)    
+if typeof(hex) ~= "string" then
+        return nil
+    end
+    local ok, color = pcall(Color3.fromHex, hex)
+    return (ok and{color }or{nil
+})[1]end local prune=function(
+
+
+list, now)    
+for index = #list, 1, -1 do
+        if now - list[index].time > IMPACT_MATCH_TIME then
+            table.remove(list, index)
+        end
+    end
+end local takeNear=function(
+
+
+list, point)    
+for index = #list, 1, -1 do
+        if (list[index].point - point).Magnitude < IMPACT_MATCH_RANGE then
+            return table.remove(list, index)
+        end
+    end
+    return nil
+end local appliesTo=function(
+
+
+player)    
+local applyTo = Options["Tracers/ApplyTo"].Value
+    if player == LocalPlayer then
+        return applyTo["My Shots"] == true
+    end
+    return applyTo["Other Players"] == true
+end local removeLine=function(
+
+line)    
+if line.part then
+        line.part:Destroy()
+    else
+        line.drawing:Remove()
+    end
+end
+-- where our lines live: under the camera, so they're local and out of workspace's children
+
+function main:_folder()
+    local camera = workspace.CurrentCamera
+    if not (self.folder and self.folder.Parent == camera) then
+        self.folder = Instance.new("Folder")
+        self.folder.Name = "\255"
+        self.folder.Parent = camera
+    end
+    return self.folder
+end
+
+function main:_drawLine(from, to)
+    local length = (to - from).Magnitude
+    if length < 0.1 then
+        return
+    end
+    local thickness = Options["Tracers/Thickness"].Value
+    local opacity = Options["Tracers/Opacity"].Value
+
+    if Toggles["Tracers/Overlay"].Value then
+        local line = Drawing.new("Line")
+        line.Color = Options["Tracers/Color"].Value
+        line.Visible = false
+        line.ZIndex = 3
+        table.insert(self.lines, {
+            drawing = line,
+            from = from,
+            to = to,
+            thickness = thickness,
+            born = os.clock(),
+            -- a line on the screen with no duration would never show, so it gets a moment
+            duration = math.max(Options["Tracers/Duration"].Value, OVERLAY_MIN_DURATION),
+            opacity = opacity,
+        })
+        return
+    end
+
+    local part = Instance.new("Part")
+    part.Name = "\255"
+    part.Anchored = true
+    part.CanCollide = false
+    part.CanQuery = false
+    part.CanTouch = false
+    part.CastShadow = false
+    part.Material = (Toggles["Tracers/Neon"].Value and{(Enum.Material.Neon )}or{(Enum.Material.SmoothPlastic
+)})[1]    part.Color = Options["Tracers/Color"].Value
+    part.Size = Vector3.new(thickness, thickness, length)
+    part.CFrame = CFrame.lookAt((from + to) / 2, to)
+    part.Transparency = 1 - opacity
+    part.Parent = self:_folder()
+    table.insert(self.lines, { part = part, born = os.clock(), duration = Options["Tracers/Duration"].Value, opacity = opacity })
+end
+
+function main:_onTracer(streak)
+    local mesh = streak:FindFirstChildOfClass("BlockMesh")
+    utility.onShotPlaced(streak, function(back, front, shooter, toolName)
+        if BUILD_TOOLS[toolName] then
+            return
+        end
+
+        -- another EclX user's own colors, shared through sync, win over how we restyle others
+        local theirs = shooter ~= LocalPlayer and self.sync and self.sync:cosmeticsOf(shooter)
+        local theirImpact = theirs and colorOf(theirs.impactColor)
+        if theirImpact then
+            self:_syncedShot(front, theirImpact)
+        end
+        local theirColor = theirs and colorOf(theirs.tracerColor)
+        if theirColor then
+            streak.Color = theirColor
+            streak.Material = Enum.Material.Neon
+            return
+        end
+
+        if not Toggles.Tracers.Value or not appliesTo(shooter) then
+            return
+        end
+
+        local thickness = Options["Tracers/Thickness"].Value
+        streak.Color = Options["Tracers/Color"].Value
+        streak.Transparency = 1 - Options["Tracers/Opacity"].Value
+        if Toggles["Tracers/Neon"].Value then
+            streak.Material = Enum.Material.Neon
+        end
+        if mesh then
+            mesh.Scale = Vector3.new(thickness, thickness, 1)
+        end
+
+        if Options["Tracers/Duration"].Value > 0 then
+            self:_drawLine(back, front)
+        end
+    end)
+end
+local paintImpact=function(
+hit, color)    
+for _, emitter in hit:GetChildren() do
+        if emitter:IsA("ParticleEmitter") and IMPACT_EMITTERS[emitter.Name] then
+            emitter.Color = ColorSequence.new(color)
+        end
+    end
+end local impactPoint=function(
+
+hit)    
+if hit:IsA("BasePart") then
+        return hit.Position
+    end
+    return (hit:IsA("Attachment") and{(hit.WorldPosition )}or{nil
+})[1]end
+-- a synced player's shot landed at point: colors its impact if that's already in, or waits for it
+
+function main:_syncedShot(point, color)
+    local now = os.clock()
+    prune(self.impacts, now)
+    local impact = takeNear(self.impacts, point)
+    if impact then
+        if impact.part.Parent then
+            paintImpact(impact.part, color)
+        end
+        return
+    end
+    prune(self.syncedShots, now)
+    table.insert(self.syncedShots, { point = point, color = color, time = now })
+end
+
+function main:_onImpact(hit)
+    local point = impactPoint(hit)
+    if point and self.sync and next(self.sync.remote) then
+        local now = os.clock()
+        prune(self.syncedShots, now)
+        local shot = takeNear(self.syncedShots, point)
+        if shot then
+            paintImpact(hit, shot.color)
+            return
+        end
+        -- its shot may not be placed yet
+        prune(self.impacts, now)
+        table.insert(self.impacts, { part = hit, point = point, time = now })
+    end
+    if Toggles["Tracers/Impact"].Value then
+        paintImpact(hit, Options["Tracers/ImpactColor"].Value)
+    end
+end
+
+-- muzzle flashes
+
+-- the color this player's muzzle flashes take, or nil to leave them as the game has them. a synced
+-- player's own pick wins
+function main:_flashColor(player)
+    local theirs = player ~= LocalPlayer and self.sync and self.sync:cosmeticsOf(player)
+    local theirColor = theirs and colorOf(theirs.muzzleColor)
+    if theirColor then
+        return theirColor
+    end
+    if Toggles["Tracers/Muzzle"].Value and appliesTo(player) then
+        return Options["Tracers/MuzzleColor"].Value
+    end
+    return nil
+end
+
+function main:_paintFlash(instance, color)
+    if instance:IsA("ParticleEmitter") then
+        self.flashes:set(instance, "Color", ColorSequence.new(color))
+    elseif instance:IsA("Light") then
+        self.flashes:set(instance, "Color", color)
+    end
+end
+local flarePart=function(
+tool)    
+local handle = tool:FindFirstChild("Handle")
+    return handle and handle:FindFirstChild("FlareEmitterPart")
+end
+
+function main:_paintGun(tool, player)
+    local flare = flarePart(tool)
+    local color = flare and self:_flashColor(player)
+    if color then
+        for _, child in flare:GetChildren() do
+            self:_paintFlash(child, color)
+        end
+    end
+end
+
+-- puts every muzzle flash back, then paints them again with the current settings
+function main:refreshFlashes()
+    self.flashes:releaseAll()
+    for tool, player in self.guns do
+        if tool.Parent then
+            self:_paintGun(tool, player)
+        else
+            self.guns[tool] = nil
+        end
+    end
+end
+
+function main:_trackGun(tool, player)
+    if not tool:IsA("Tool") or BUILD_TOOLS[tool.Name] or self.guns[tool] then
+        return
+    end
+    -- the handle's parts can come in after the tool
+    task.defer(function()
+        local flare = flarePart(tool)
+        if not flare or self.guns[tool] then
+            return
+        end
+        self.guns[tool] = player
+        -- a gun can add another light to its flare part when it fires
+        flare.ChildAdded:Connect(function(child)
+            local color = self.guns[tool] and self:_flashColor(player)
+            if color then
+                self:_paintFlash(child, color)
+            end
+        end)
+        self:_paintGun(tool, player)
+    end)
+end
+
+function main:_watchPlayer(player)
+local onCharacter=function(character)        
+for _, child in character:GetChildren() do
+            self:_trackGun(child, player)
+        end
+        character.ChildAdded:Connect(function(child)
+            self:_trackGun(child, player)
+        end)
+end    
+if player.Character then
+        onCharacter(player.Character)
+    end
+    player.CharacterAdded:Connect(onCharacter)
+end
+
+function main:start()
+    local effects = workspace:WaitForChild("Effects")
+    effects.ChildAdded:Connect(function(child)
+        if (Toggles.Tracers.Value or self.sync) and utility.isShotStreak(child) then
+            self:_onTracer(child)
+        elseif child.Name == "HitParticle" and (Toggles["Tracers/Impact"].Value or self.sync) then
+            -- the emitters are added with the part; give them a frame to be there
+            task.defer(self._onImpact, self, child)
+        end
+    end)
+
+    -- turning tracers off clears the lines still fading
+    Toggles.Tracers:OnChanged(function(enabled)
+        if not enabled then
+            for _, line in self.lines do
+                removeLine(line)
+            end
+            table.clear(self.lines)
+        end
+    end)
+
+    for _, player in Players:GetPlayers() do
+        self:_watchPlayer(player)
+    end
+    Players.PlayerAdded:Connect(function(player)
+        self:_watchPlayer(player)
+    end)
+    local refresh = function()
+        self:refreshFlashes()
+    end
+    Toggles["Tracers/Muzzle"]:OnChanged(refresh)
+    Options["Tracers/MuzzleColor"]:OnChanged(refresh)
+    Options["Tracers/ApplyTo"]:OnChanged(refresh)
+    if self.sync then
+        self.sync.changed:Connect(refresh)
+    end
+end
+local project=function(
+
+camera, from, to)    
+local cframe = camera.CFrame
+    local a, b = cframe:PointToObjectSpace(from), cframe:PointToObjectSpace(to)
+    -- in camera space, in front is negative Z
+    if a.Z > -NEAR_PLANE and b.Z > -NEAR_PLANE then
+        return false
+    end
+    if a.Z > -NEAR_PLANE then
+        a = b:Lerp(a, (b.Z + NEAR_PLANE) / (b.Z - a.Z))
+    elseif b.Z > -NEAR_PLANE then
+        b = a:Lerp(b, (a.Z + NEAR_PLANE) / (a.Z - b.Z))
+    end
+    local pointA = camera:WorldToViewportPoint(cframe:PointToWorldSpace(a))
+    local pointB = camera:WorldToViewportPoint(cframe:PointToWorldSpace(b))
+    return Vector2.new(pointA.X, pointA.Y), Vector2.new(pointB.X, pointB.Y), (-a.Z - b.Z) / 2
+end
+-- call every frame: fades the lines out, and moves the screen ones with the camera
+
+function main:update()
+    local lines = self.lines
+    if #lines == 0 then
+        return
+    end
+    local now = os.clock()
+    local camera = workspace.CurrentCamera
+    -- pixels one stud covers at one stud away, so a screen line is as thick as the tracer would look
+    local pixelsPerStud = camera.ViewportSize.Y / (2 * math.tan(math.rad(camera.FieldOfView) / 2))
+    for index = #lines, 1, -1 do
+        local line = lines[index]
+        local age = (now - line.born) / math.max(line.duration, 0.01)
+        if age >= 1 then
+            removeLine(line)
+            table.remove(lines, index)
+        elseif line.part then
+            line.part.Transparency = 1 - line.opacity * (1 - age)
+        else
+            local drawing = line.drawing
+            local from, to, depth = project(camera, line.from, line.to)
+            if from then
+                drawing.From = from
+                drawing.To = to
+                drawing.Thickness = math.clamp(line.thickness * pixelsPerStud / math.max(depth, 1), 1, 6)
+                drawing.Transparency = line.opacity * (1 - age)
+                drawing.Visible = true
+            else
+                drawing.Visible = false
+            end
+        end
+    end
+end
+
+return main
+end function dote.ah()local v=dote.cache.ah if not v then v={c=__modImpl()}dote.cache.ah=v end return v.c end end do local __modImpl=function()-- custom avatar: dresses your own character as a roblox catalog bundle, on your screen only (nobody else
+-- sees it, and the server never hears about it). the bundle's outfit is built into a model with
+-- Players:CreateHumanoidModelFromDescription, then copied onto the character:
+--   body meshes   MeshPart:ApplyMesh onto your R15 parts, so they keep their own size (hitboxes and
+--                 movement stay exactly the same; the bundle's shapes are fitted to them)
+--   accessories   yours are put away and the bundle's are worn instead (Keep My Accessories keeps yours)
+--   head          the game's head is a plain Part, which ApplyMesh can't change, so it's hidden (with its
+--                 face) and the bundle's head, face included, is welded on at the neck in its place
+--   clothing and body colors
+-- everything taken off is kept, so turning it off (or the turn everything off button) puts it all back.
+-- the game's own gear on the character (iridium tank, head lamp) is left alone.
+-- with cosmetic sync on, other EclX users are dressed in the bundle they picked, the same way
+
+
+local AssetService = game:GetService("AssetService")
+local Players = game:GetService("Players")
+
+local LocalPlayer = Players.LocalPlayer
+
+local BODY_PARTS = {
+    "UpperTorso", "LowerTorso",
+    "LeftUpperArm", "LeftLowerArm", "LeftHand",
+    "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
+}
+local CLOTHING = { "Shirt", "Pants", "ShirtGraphic" }
+-- marks what we put on, so it can be told apart from the game's
+local WORN_ATTRIBUTE = "EclXWorn"
+
+local main = {}
+main.__index = main
+
+-- sync (optional): cosmetic sync, for other EclX users' own bundles
+function main.new(sync)
+    return setmetatable({
+        sync = sync,
+        models = {}, -- bundle id -> built model (built once per id)
+        applied = nil, -- { character, meshes, accessories, clothing, bodyColors, hidden }
+        busy = false,
+        others = {}, -- other players -> { applied, wearing, busy, pending }
+    }, main)
+end
+
+-- the outfit a bundle dresses you in, as a model; nil and why on failure
+function main:_bundleModel(bundleId)
+    local cached = self.models[bundleId]
+    if cached then
+        return cached
+    end
+
+    local ok, details = pcall(AssetService.GetBundleDetailsAsync, AssetService, bundleId)
+    if not ok then
+        return nil, "no bundle with that id"
+    end
+    local outfitId
+    for _, item in details.Items do
+        if item.Type == "UserOutfit" then
+            outfitId = item.Id
+            break
+        end
+    end
+    if not outfitId then
+        return nil, string.format('"%s" has no outfit to wear', tostring(details.Name))    
+end
+
+    local okDescription, description = pcall(Players.GetHumanoidDescriptionFromOutfitId, Players, outfitId)
+    if not okDescription then
+        return nil, "couldn't load the bundle's outfit"
+    end
+    local okModel, model = pcall(Players.CreateHumanoidModelFromDescription, Players, description, Enum.HumanoidRigType.R15)
+    if not okModel or not model then
+        return nil, "couldn't build the bundle"
+    end
+
+    model.Name = details.Name
+    self.models[bundleId] = model
+    return model
+end
+local restore=function(
+
+applied)    
+local character = applied.character
+    if not character.Parent then
+        return
+    end
+
+    for part, original in applied.meshes do
+        if part.Parent then
+            pcall(part.ApplyMesh, part, original)
+            part.TextureID = original.TextureID
+        end
+        original:Destroy()
+    end
+    for _, child in character:GetChildren() do
+        if child:GetAttribute(WORN_ATTRIBUTE) then
+            child:Destroy()
+        end
+    end
+    for _, accessory in applied.accessories do
+        accessory.Parent = character
+    end
+    for _, item in applied.clothing do
+        item.Parent = character
+    end
+    if applied.bodyColors then
+        applied.bodyColors.Parent = character
+    end
+    for instance, transparency in applied.hidden do
+        if instance.Parent then
+            instance.Transparency = transparency
+        end
+    end
+end
+
+function main:_restore()
+    local applied = self.applied
+    if not applied then
+        return
+    end
+    self.applied = nil
+    restore(applied)
+end
+local newApplied=function(
+character)    
+return {
+        character = character,
+        meshes = {},
+        accessories = {},
+        clothing = {},
+        hidden = {}, -- the head and its face decals -> their transparency
+    }
+end local attachmentFor=function(
+
+
+character, head, name)    
+local onHead = head and head:FindFirstChild(name)
+    if onHead and onHead:IsA("Attachment") then
+        return onHead
+    end
+    for _, part in character:GetChildren() do
+        local attachment = part:IsA("BasePart") and part ~= head and part:FindFirstChild(name)
+        if attachment and attachment:IsA("Attachment") then
+            return attachment
+        end
+    end
+    return nil
+end local wear=function(
+
+
+
+character, head, accessory)    
+local worn = accessory:Clone()
+    local handle = worn:FindFirstChild("Handle")
+    local attachment = handle and handle:FindFirstChildOfClass("Attachment")
+    local target = attachment and attachmentFor(character, head, attachment.Name)
+    if not target then
+        worn:Destroy()
+        return
+    end
+    for _, joint in handle:GetChildren() do
+        if joint:IsA("JointInstance") or joint:IsA("WeldConstraint") then
+            joint:Destroy()
+        end
+    end
+    handle.Anchored = false
+    handle.CanCollide = false
+    handle.CanQuery = false
+    handle.CanTouch = false
+    handle.Massless = true
+    local weld = Instance.new("Weld")
+    weld.Name = "AccessoryWeld"
+    weld.Part0 = target.Parent
+    weld.Part1 = handle
+    weld.C0 = target.CFrame
+    weld.C1 = attachment.CFrame
+    weld.Parent = handle
+    worn:SetAttribute(WORN_ATTRIBUTE, true)
+    worn.Parent = character
+end local dress=function(
+
+
+applied, model, keepAccessories)    
+local character = applied.character
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.RigType ~= Enum.HumanoidRigType.R15 then
+        return false, "your character isn't R15"
+    end
+
+    for _, name in BODY_PARTS do
+        local part, source = character:FindFirstChild(name), model:FindFirstChild(name)
+        if part and source and part:IsA("MeshPart") and source:IsA("MeshPart") then
+            local original = part:Clone()
+            original:ClearAllChildren()
+            if pcall(part.ApplyMesh, part, source) then
+                part.TextureID = source.TextureID
+                applied.meshes[part] = original
+            else
+                original:Destroy()
+            end
+        end
+    end
+
+    if not keepAccessories then
+        for _, child in character:GetChildren() do
+            if child:IsA("Accessory") and not child:GetAttribute(WORN_ATTRIBUTE) then
+                table.insert(applied.accessories, child)
+                child.Parent = nil
+            end
+        end
+    end
+    for _, className in CLOTHING do
+        local source = model:FindFirstChildOfClass(className)
+        if source then
+            local existing = character:FindFirstChildOfClass(className)
+            if existing then
+                table.insert(applied.clothing, existing)
+                existing.Parent = nil
+            end
+            local worn = source:Clone()
+            worn:SetAttribute(WORN_ATTRIBUTE, true)
+            worn.Parent = character
+        end
+    end
+
+    local colors = model:FindFirstChildOfClass("BodyColors")
+    if colors then
+        applied.bodyColors = character:FindFirstChildOfClass("BodyColors")
+        if applied.bodyColors then
+            applied.bodyColors.Parent = nil
+        end
+        local worn = colors:Clone()
+        worn:SetAttribute(WORN_ATTRIBUTE, true)
+        worn.Parent = character
+    end
+
+    local head, sourceHead = character:FindFirstChild("Head"), model:FindFirstChild("Head")
+    local neck = head and head:FindFirstChild("NeckRigAttachment")
+    local sourceNeck = sourceHead and sourceHead:FindFirstChild("NeckRigAttachment")
+    if neck and sourceNeck then
+        local fake = sourceHead:Clone()
+        fake.Name = "EclXHead"
+        fake:SetAttribute(WORN_ATTRIBUTE, true)
+        fake.Anchored = false
+        fake.CanCollide = false
+        fake.CanQuery = false
+        fake.CanTouch = false
+        fake.Massless = true
+        -- its rig joints still point at the bundle model's parts
+        for _, joint in fake:GetChildren() do
+            if joint:IsA("JointInstance") or joint:IsA("Constraint") then
+                joint:Destroy()
+            end
+        end
+        local weld = Instance.new("Weld")
+        weld.Part0 = head
+        weld.Part1 = fake
+        weld.C0 = neck.CFrame
+        weld.C1 = fake.NeckRigAttachment.CFrame
+        weld.Parent = fake
+        fake.Parent = character
+
+        applied.hidden[head] = head.Transparency
+        head.Transparency = 1
+        for _, decal in head:GetChildren() do
+            if decal:IsA("Decal") then
+                applied.hidden[decal] = decal.Transparency
+                decal.Transparency = 1
+            end
+        end
+    end
+
+    -- head accessories go on the bundle's head when it's on
+    local wornHead = character:FindFirstChild("EclXHead") or head
+    for _, accessory in model:GetChildren() do
+        if accessory:IsA("Accessory") then
+            wear(character, wornHead, accessory)
+        end
+    end
+
+    return true
+end
+
+function main:_apply(character, model)
+    local applied = newApplied(character)
+    self.applied = applied
+    return dress(applied, model, Toggles["Avatar/KeepAccessories"].Value)
+end
+
+-- dresses another player in the bundle they synced, or puts them back when there's none
+function main:_refreshOther(player)
+    local state = self.others[player]
+    if not state then
+        state = {}
+        self.others[player] = state
+    end
+    -- a change made while a bundle is still loading runs once that's done
+    if state.busy then
+        state.pending = true
+        return
+    end
+
+    local character = player.Character
+    local cosmetics = self.sync:cosmeticsOf(player)
+    local bundleId = cosmetics and tonumber(cosmetics.bundleId)
+    local keepAccessories = cosmetics and cosmetics.bundleKeepAccessories == true
+    local wearing = (bundleId and character and{(string.format('%s/%s', tostring(bundleId), tostring(keepAccessories)))}or{nil
+})[1]    -- already dressed like this
+    if state.applied and state.applied.character == character and state.wearing == wearing then
+        return
+    end
+
+    state.busy = true
+    if state.applied then
+        restore(state.applied)
+        state.applied = nil
+    end
+    if wearing then
+        local model = self:_bundleModel(bundleId)
+        if model and player.Parent and player.Character == character then
+            local applied = newApplied(character)
+            state.applied = applied
+            local ran, ok = pcall(dress, applied, model, keepAccessories)
+            if not (ran and ok) then
+                restore(applied)
+                state.applied = nil
+            end
+        end
+    end
+    state.wearing = wearing
+    state.busy = false
+    if state.pending then
+        state.pending = false
+        self:_refreshOther(player)
+    end
+end
+
+function main:refreshOthers()
+    for _, player in Players:GetPlayers() do
+        if player ~= LocalPlayer and (self.others[player] or self.sync:cosmeticsOf(player)) then
+            task.spawn(self._refreshOther, self, player)
+        end
+    end
+end
+
+function main:_watchOther(player)
+    player.CharacterAdded:Connect(function(character)
+        local state = self.others[player]
+        if state then
+            state.applied = nil
+        end
+        if not self.sync:cosmeticsOf(player) then
+            return
+        end
+        character:WaitForChild("Humanoid", 10)
+        character:WaitForChild("UpperTorso", 10)
+        task.wait(1)
+        if player.Character == character then
+            self:_refreshOther(player)
+        end
+    end)
+end
+
+-- puts the current settings on: restores whatever was worn, then dresses the character again if it's on
+function main:refresh(notify)
+    -- a change made while a bundle is still loading runs once that's done
+    if self.busy then
+        self.pending = true
+        return
+    end
+    self.busy = true
+    self:_restore()
+
+    local character = LocalPlayer.Character
+    if Toggles["Avatar/Enabled"].Value and character then
+        local bundleId = tonumber(Options["Avatar/BundleId"].Value)
+        local ok, err
+        if not bundleId then
+            ok, err = false, "type a bundle id from the roblox catalog"
+        else
+            local model
+            model, err = self:_bundleModel(bundleId)
+            if model then
+                local ran, result, reason = pcall(self._apply, self, character, model)
+                ok, err = ran and result, (ran and{reason }or{result
+})[1]                -- half dressed is worse than not at all
+                if not ok then
+                    self:_restore()
+                end
+                if ok and notify then
+                    notify(string.format('Wearing "%s"', tostring(model.Name)))
+                end
+            end
+        end
+        if not ok and notify then
+            notify(string.format('Custom avatar: %s', tostring(err)), "warn")
+        end
+    end
+
+    self.busy = false
+    if self.pending then
+        self.pending = false
+        self:refresh(notify)
+    end
+end
+
+function main:start(notify)
+local refresh=function()        
+task.spawn(self.refresh, self, notify)
+end    
+Toggles["Avatar/Enabled"]:OnChanged(refresh)
+    Toggles["Avatar/KeepAccessories"]:OnChanged(function()
+        if Toggles["Avatar/Enabled"].Value then
+            refresh()
+        end
+    end)
+    Options["Avatar/BundleId"]:OnChanged(function()
+        if Toggles["Avatar/Enabled"].Value then
+            refresh()
+        end
+    end)
+
+    -- a new life comes with the game's own look; dress it once its parts are in
+    LocalPlayer.CharacterAdded:Connect(function(character)
+        self.applied = nil
+        if not Toggles["Avatar/Enabled"].Value then
+            return
+        end
+        character:WaitForChild("Humanoid", 10)
+        character:WaitForChild("UpperTorso", 10)
+        task.wait(1)
+        if LocalPlayer.Character == character then
+            refresh()
+        end
+    end)
+
+    if self.sync then
+        for _, player in Players:GetPlayers() do
+            if player ~= LocalPlayer then
+                self:_watchOther(player)
+            end
+        end
+        Players.PlayerAdded:Connect(function(player)
+            self:_watchOther(player)
+        end)
+        Players.PlayerRemoving:Connect(function(player)
+            self.others[player] = nil
+        end)
+        self.sync.changed:Connect(function()
+            self:refreshOthers()
+        end)
+    end
+end
+
+return main
+end function dote.ai()local v=dote.cache.ai if not v then v={c=__modImpl()}dote.cache.ai=v end return v.c end end do local __modImpl=function()-- counter strike style kill feed, plus an unreal / cs 1.6 quake sounds style announcer.
+--   feed       top right, newest on top: "Killer  [WEAPON]  Victim" in team colors. lines with you in them
+--              get a red edge, like your own kills in cs. a death nobody gets credit for shows [DIED]
+--   announcer  counts your kills in one life. the second kill of a life is a double kill, the third a
+--              triple, and so on; dying starts the count again. it's said out loud by the unreal
+--              tournament announcer (public roblox uploads of the original clips, every one checked to
+--              load in game) or roblox text to speech, and / or flashed big at the top of the screen
+-- kills come from Combat (see combat.luau)
+
+
+local Players = game:GetService("Players")
+
+local theme = dote.b()
+local sounds = dote.l()
+
+local colors = theme.colors
+local fonts = theme.fonts
+local create = theme.create
+local corner = theme.corner
+
+local FEED_MAX = 5
+local FEED_LIFETIME = 6
+local FLASH_HOLD = 0.9
+local FLASH_FADE = 0.45
+local MY_LINE = Color3.fromRGB(220, 40, 40)
+
+-- kills in a life -> what's announced and the unreal tournament clip for it (the last repeats past the end)
+local STREAK_LINES = {
+    [2] = { "Double Kill", 937894293 },
+    [3] = { "Triple Kill", 6410923021 },
+    [4] = { "Multi Kill", 937890819 },
+    [5] = { "Mega Kill", 937895810 },
+    [6] = { "Ultra Kill", 938073601 },
+    [7] = { "Monster Kill", 938076502 },
+    [8] = { "Ludicrous Kill", 937881966 },
+    [9] = { "Godlike", 6410918897 },
+}
+local LAST_LINE = 9
+
+local LocalPlayer = Players.LocalPlayer
+
+local main = {}
+main.__index = main
+
+function main.new(combat)
+    return setmetatable({
+        combat = combat,
+        streak = 0,
+        entries = {},
+        order = 0,
+        flashToken = 0,
+    }, main)
+end
+
+function main:_build()
+    local gui = create("ScreenGui", {
+        Name = "\255",
+        IgnoreGuiInset = true,
+        ResetOnSpawn = false,
+        DisplayOrder = 8,
+        Parent = theme.guiParent(),
+    })
+    self.gui = gui
+
+    self.feedScale = create("UIScale", {})
+    self.feed = create("Frame", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -14, 0, 64),
+        Size = UDim2.fromOffset(420, 300),
+        BackgroundTransparency = 1,
+        Parent = gui,
+    }, {
+        self.feedScale,
+        create("UIListLayout", {
+            Padding = UDim.new(0, 3),
+            HorizontalAlignment = Enum.HorizontalAlignment.Right,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+        }),
+    })
+
+    self.flashScale = create("UIScale", {})
+    self.flash = theme.text({
+        AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(0.5, 0, 0.11, 0),
+        Size = UDim2.fromOffset(600, 40),
+        Font = fonts.black,
+        TextSize = 30,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextTruncate = Enum.TextTruncate.None,
+        TextStrokeTransparency = 0.4,
+        TextTransparency = 1,
+        Visible = false,
+        Parent = gui,
+    })
+    self.flashScale.Parent = self.flash
+end
+local nameOf=function(
+player)    
+local color = (player.Team and{(player.TeamColor.Color )}or{(colors.textDim
+)})[1]    return string.format('<font color="%s"><b>%s</b></font>', tostring(theme.hex(color:Lerp(Color3.new(1, 1, 1), 0.2))), tostring(player.DisplayName))end
+
+
+function main:_pushFeed(killer, victim, weapon)
+    if not Toggles.KillFeed.Value then
+        return
+    end
+    local mine = killer == LocalPlayer or victim == LocalPlayer
+    if Toggles["KillFeed/OnlyMine"].Value and not mine then
+        return
+    end
+
+    local middle = (killer
+and{(string.format('<font color="#c8c8c8">[%s]</font>', tostring(string.upper(weapon or "KILL"))))}or{'<font color="#c8c8c8">[DIED]</font>'})[1]    
+
+local text = (killer and{(string.format('%s  %s  %s', tostring(nameOf(killer)), tostring(middle), tostring(nameOf(victim))))}or{(string.format('%s  %s', tostring(middle), tostring(nameOf(victim))))})[1]
+    
+self.order =self.order- 1
+    local entry = theme.text({
+        Size = UDim2.fromOffset(0, 22),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.45,
+        Font = fonts.medium,
+        TextSize = 13,
+        TextTruncate = Enum.TextTruncate.None,
+        RichText = true,
+        Text = text,
+        LayoutOrder = self.order,
+        Parent = self.feed,
+    })
+    corner(3).Parent = entry
+    theme.padding(8, 8, 0, 0).Parent = entry
+    local outline = theme.stroke((mine and{MY_LINE }or{(Color3.new(0, 0, 0))})[1], mine and 1.5 or 1, mine and 0 or 0.6)
+    outline.Parent = entry
+
+    table.insert(self.entries, 1, entry)
+    while #self.entries > FEED_MAX do
+        table.remove(self.entries):Destroy()
+    end
+
+    task.delay(FEED_LIFETIME, function()
+        if entry.Parent then
+            theme.tween(entry, 0.4, { BackgroundTransparency = 1, TextTransparency = 1 })
+            theme.tween(outline, 0.4, { Transparency = 1 })
+            task.wait(0.45)
+            local index = table.find(self.entries, entry)
+            if index then
+                table.remove(self.entries, index)
+            end
+            entry:Destroy()
+        end
+    end)
+end
+
+function main:_flash(text)
+    self.flashToken =self.flashToken+ 1
+    local token = self.flashToken
+    local flash = self.flash
+    flash.Text = string.upper(text)
+    flash.TextColor3 = Options["Announcer/FlashColor"].Value
+    flash.TextTransparency = 0
+    flash.TextStrokeTransparency = 0.4
+    flash.Visible = true
+    -- a quick pop in
+    self.flashScale.Scale = 1.25
+    theme.tween(self.flashScale, 0.18, { Scale = 1 }, Enum.EasingStyle.Back)
+
+    task.delay(FLASH_HOLD, function()
+        if token ~= self.flashToken then
+            return
+        end
+        theme.tween(flash, FLASH_FADE, { TextTransparency = 1, TextStrokeTransparency = 1 })
+        task.wait(FLASH_FADE)
+        if token == self.flashToken then
+            flash.Visible = false
+        end
+    end)
+end
+
+function main:_say(line)
+    if Toggles["Announcer/Voice"].Value then
+        local volume = Options["Announcer/Volume"].Value
+        if Options["Announcer/Pack"].Value == "Robot" then
+            sounds.speak(line[1], Options["Announcer/VoiceId"].Value, volume, Options["Announcer/Speed"].Value)
+        else
+            sounds.play(string.format('rbxassetid://%s', tostring(line[2])), volume)
+        end
+    end
+    if Toggles["Announcer/Flash"].Value then
+        self:_flash(line[1])
+    end
+end
+
+function main:_announce()
+    local line = STREAK_LINES[math.min(self.streak, LAST_LINE)]
+    if line and Toggles.Announcer.Value then
+        self:_say(line)
+    end
+end
+
+-- plays a double kill with the current voice and flash settings, to try them out
+function main:test()
+    self:_say(STREAK_LINES[2])
+end
+
+function main:start()
+    self:_build()
+
+    Options["KillFeed/Scale"]:OnChanged(function(value)
+        self.feedScale.Scale = value
+    end)
+    self.feedScale.Scale = Options["KillFeed/Scale"].Value
+    Toggles.KillFeed:OnChanged(function(enabled)
+        if not enabled then
+            for _, entry in self.entries do
+                entry:Destroy()
+            end
+            table.clear(self.entries)
+        end
+    end)
+
+    self.combat.died:Connect(function(killer, victim, weapon)
+        if victim == LocalPlayer then
+            self.streak = 0
+        elseif killer == LocalPlayer then
+            self.streak =self.streak+ 1
+            self:_announce()
+        end
+        self:_pushFeed(killer, victim, weapon)
+    end)
+
+    -- a new life starts the count over
+    LocalPlayer.CharacterAdded:Connect(function()
+        self.streak = 0
+    end)
+end
+
+return main
+end function dote.aj()local v=dote.cache.aj if not v then v={c=__modImpl()}dote.cache.aj=v end return v.c end end do local __modImpl=function()-- hit feedback, all from Combat (see combat.luau):
+--   hit sound     a preset or any audio id, when one of your shots lands
+--   hit marker    the four ticks around the cursor, fading out
+--   damage        a number that floats up off whoever took the damage. hits on the same player close
+--   numbers       together add up into one number (so an smg shows 64, not eight 8s)
+
+
+local UserInputService = game:GetService("UserInputService")
+
+local sounds = dote.l()
+
+local MARKER_TIME = 0.28
+local NUMBER_TIME = 0.9
+local NUMBER_RISE = 3 -- studs a number floats up over its life
+local STACK_WINDOW = 0.6 -- hits on one player this close together share a number
+
+local main = {}
+main.__index = main
+
+function main.new(combat)
+    return setmetatable({
+        combat = combat,
+        markerAt = -math.huge,
+        marker = nil,
+        numbers = {}, -- { text, position, born, amount, player, lastHit }
+    }, main)
+end
+
+function main:_markerLines()
+    if not self.marker then
+        self.marker = {}
+        for index = 1, 4 do
+            local line = Drawing.new("Line")
+            line.Visible = false
+            line.ZIndex = 5
+            self.marker[index] = line
+        end
+    end
+    return self.marker
+end
+
+function main:_onHit()
+    if Toggles.HitSound.Value then
+        sounds.play(
+            sounds.resolve(Options["HitSound/Preset"].Value, Options["HitSound/CustomId"].Value),
+            Options["HitSound/Volume"].Value,
+            Options["HitSound/Pitch"].Value
+        )
+    end
+    if Toggles.HitMarker.Value then
+        self.markerAt = os.clock()
+    end
+end
+
+function main:_onDamage(player, amount, position, mine)
+    if not Toggles.DamageNumbers.Value or (Toggles["DamageNumbers/OnlyMine"].Value and not mine) then
+        return
+    end
+    local now = os.clock()
+    -- add onto this player's number while it's fresh
+    for _, number in self.numbers do
+        if number.player == player and now - number.lastHit <= STACK_WINDOW then
+            number.amount =number.amount+ amount
+            number.lastHit = now
+            number.born = now
+            number.position = position
+            return
+        end
+    end
+
+    local text = Drawing.new("Text")
+    text.Center = true
+    text.Outline = true
+    text.Font = Drawing.Fonts.Plex or Drawing.Fonts.Monospace
+    text.ZIndex = 4
+    table.insert(self.numbers, {
+        text = text,
+        position = position,
+        born = now,
+        lastHit = now,
+        amount = amount,
+        player = player,
+    })
+end
+
+function main:start()
+    self.combat.hit:Connect(function()
+        self:_onHit()
+    end)
+    self.combat.damaged:Connect(function(player, amount, position, mine)
+        self:_onDamage(player, amount, position, mine)
+    end)
+end
+
+-- call every frame
+function main:update()
+    local now = os.clock()
+
+    -- marker
+    local age = (now - self.markerAt) / MARKER_TIME
+    if self.marker or age < 1 then
+        local lines = self:_markerLines()
+        local show = age < 1 and Toggles.HitMarker.Value
+        if show then
+            local mouse = UserInputService:GetMouseLocation()
+            local size = Options["HitMarker/Size"].Value
+            local gap = size * 0.45
+            local color = Options["HitMarker/Color"].Value
+            local opacity = 1 - age
+            for index, direction in { Vector2.new(-1, -1), Vector2.new(1, -1), Vector2.new(-1, 1), Vector2.new(1, 1) } do
+                local line = lines[index]
+                line.From = mouse + direction * gap
+                line.To = mouse + direction * (gap + size)
+                line.Color = color
+                line.Thickness = 2
+                line.Transparency = opacity
+                line.Visible = true
+            end
+        else
+            for _, line in lines do
+                line.Visible = false
+            end
+        end
+    end
+
+    -- numbers
+    local numbers = self.numbers
+    if #numbers == 0 then
+        return
+    end
+    local camera = workspace.CurrentCamera
+    local color = Options["DamageNumbers/Color"].Value
+    local size = Options["DamageNumbers/Size"].Value
+    for index = #numbers, 1, -1 do
+        local number = numbers[index]
+        local life = (now - number.born) / NUMBER_TIME
+        if life >= 1 or not Toggles.DamageNumbers.Value then
+            number.text:Remove()
+            table.remove(numbers, index)
+            continue
+        end
+        local point, onScreen = camera:WorldToViewportPoint(number.position + Vector3.new(0, 2 + NUMBER_RISE * life, 0))
+        local text = number.text
+        if onScreen then
+            text.Text = tostring(math.round(number.amount))
+            text.Position = Vector2.new(point.X, point.Y)
+            text.Size = size
+            text.Color = color
+            -- solid for the first half, then fades
+            text.Transparency = math.clamp(2 - life * 2, 0, 1)
+            text.Visible = true
+        else
+            text.Visible = false
+        end
+    end
+end
+
+return main
+end function dote.ak()local v=dote.cache.ak if not v then v={c=__modImpl()}dote.cache.ak=v end return v.c end end end-- EclX client for Eclipsis
 
 
 loadstring([[
@@ -14212,6 +16943,10 @@ local structures = dote.e()
 local Tracker = dote.f()
 local StatsBoard = dote.h()
 local scoreWeights = dote.i()
+local Combat = dote.k()
+local sounds = dote.l()
+local Skins = dote.n()
+local Sync = dote.o()
 
 local QUICK_BUILD_SLOTS = 6
 
@@ -14247,6 +16982,18 @@ local KEYBIND_TOGGLES = {
     "LsThreatRings",
     "IridiumColors/Tanks",
     "IridiumColors/Crystals",
+    "IridiumColors/Sea",
+    "Tracers",
+    "Tracers/Muzzle",
+    "Avatar/Enabled",
+    "KillFeed",
+    "Announcer",
+    "HitSound",
+    "HitMarker",
+    "DamageNumbers",
+    "Skins",
+    "Skins/Neon",
+    "Sky/Custom",
     "ChangeBeamColors",
     "NeonBores",
     "BoreBeamColorChange",
@@ -14263,7 +17010,7 @@ local KEYBIND_TOGGLES = {
 local env = (getgenv and{(getgenv() )}or{_G
 })[1]
 -- joining a match as a spectator loads the match viewer instead of the client
-local viewer = dote.u()
+local viewer = dote.z()
 if env.EclXViewer then
     env.EclXViewer:SetVisible(true)
     return
@@ -14285,6 +17032,9 @@ if env.EclX then
 end
 
 local turnOffCall = signal.new()
+local announcerTestCall = signal.new()
+local sync = Sync.new()
+local syncStatus
 
 local window = Library.new({
     globals = true,
@@ -14293,12 +17043,18 @@ local window = Library.new({
 })
 env.EclX = window
 
+window:AddCategory("Player")
 local LocalTab = window:AddTab("Local Player")
 local CombatTab = window:AddTab("Combat")
+window:AddCategory("Building")
 local BuildTab = window:AddTab("Build")
 local AutoTab = window:AddTab("Autos")
+window:AddCategory("Visuals")
 local VisualTab = window:AddTab("Visuals")
 local ColorTab = window:AddTab("Colors")
+local SkinTab = window:AddTab("Skins")
+window:AddCategory("Extras")
+local FunTab = window:AddTab("Fun")
 local MatchTab = window:AddTab("Match")
 
 do
@@ -14317,12 +17073,14 @@ do
 
     local JetpackMods = LocalTab:AddLeftGroupbox("Jetpack")
     JetpackMods:AddCheckbox("JetPackMods", { Text = "Enable Jetpack Mods" })
-    JetpackMods:AddSlider("MaxThrustTime", { Text = "Set Max Thrust Time", Default = 5, Min = 1, Max = 100 })
-    JetpackMods:AddSlider(
+    local JetpackOptions = JetpackMods:AddDependencyBox()
+    JetpackOptions:SetupDependencies({ { Toggles["JetPackMods"], true } })
+    JetpackOptions:AddSlider("MaxThrustTime", { Text = "Set Max Thrust Time", Default = 5, Min = 1, Max = 100 })
+    JetpackOptions:AddSlider(
         "CooldownTime",
         { Text = "Set Cooldown Time", Default = 0.05, Min = 0.01, Max = 1, Rounding = 2 }
     )
-    JetpackMods:AddSlider("PowerThrust", { Text = "Set Power Thrust", Default = 17, Min = 1, Max = 100 })
+    JetpackOptions:AddSlider("PowerThrust", { Text = "Set Power Thrust", Default = 17, Min = 1, Max = 100 })
 
     local UtilityMods = LocalTab:AddLeftGroupbox("Utility")
     UtilityMods:AddCheckbox("FallDamage", { Text = "No Fall Damage" })
@@ -14331,26 +17089,47 @@ do
         Text = "Auto Interact Bore",
         Tooltip = "Aim or power any bore you point at from any distance, through shields",
     })
-    UtilityMods:AddLabel("Bore aim key"):AddKeyPicker("AutoBore/AimKey", {
+    local BoreKeyOptions = UtilityMods:AddDependencyBox()
+    BoreKeyOptions:SetupDependencies({ { Toggles["AutoInteractBore"], true } })
+    BoreKeyOptions:AddLabel("Bore aim key"):AddKeyPicker("AutoBore/AimKey", {
         Text = "Bore aim key",
         Default = "MB1",
         Mode = "Press",
         AllowMouse1 = true,
     })
-    UtilityMods:AddLabel("Bore power key"):AddKeyPicker("AutoBore/PowerKey", {
+    BoreKeyOptions:AddLabel("Bore power key"):AddKeyPicker("AutoBore/PowerKey", {
         Text = "Bore power key",
         Default = "E",
         Mode = "Press",
         AllowMouse1 = true,
     })
     UtilityMods:AddCheckbox("ArtyGravity", {Text = "Arty Gravity (PRE ECO ONLY)"})
-    UtilityMods:AddSlider(
+    local GravityOptions = UtilityMods:AddDependencyBox()
+    GravityOptions:SetupDependencies({ { Toggles["ArtyGravity"], true } })
+    GravityOptions:AddSlider(
         "GravitySlider",
         { Text = "Set Arty Gravity", Default = 70, Min = 1, Max = 100, Tooltip = "Default: 70" }
     )
     UtilityMods:AddCheckbox("StopOrbitalError", {
         Text = "Stop Orbital Error",
         Tooltip = "Blocks LS/OS use when the target is out of range (LS 125, OS 250 studs), so you don't get the cooldown",
+    })
+
+    local AvatarSection = LocalTab:AddRightGroupbox("Custom Avatar")
+    AvatarSection:AddCheckbox("Avatar/Enabled", {
+        Text = "Custom Avatar",
+        Tooltip = "Dresses your character as a catalog bundle. Only you see it, and your hitbox doesn't change",
+    })
+    local AvatarOptions = AvatarSection:AddDependencyBox()
+    AvatarOptions:SetupDependencies({ { Toggles["Avatar/Enabled"], true } })
+    AvatarOptions:AddInput("Avatar/BundleId", {
+        Text = "Bundle ID",
+        Placeholder = "the number in the bundle's catalog link",
+        Finished = true,
+    })
+    AvatarOptions:AddCheckbox("Avatar/KeepAccessories", {
+        Text = "Keep My Accessories",
+        Tooltip = "Wear the bundle's accessories on top of your own instead of in place of them",
     })
 
     local SpawnPointMods = LocalTab:AddRightGroupbox("Spawn Point")
@@ -14398,23 +17177,25 @@ end,
         Mode = "Hold",
         SyncToggleState = true,
     })
-    SilentAimSection:AddDropdown(
+    local SilentAimOptions = SilentAimSection:AddDependencyBox()
+    SilentAimOptions:SetupDependencies({ { Toggles["SilentAim"], true } })
+    SilentAimOptions:AddDropdown(
         "SilentAim/BodyParts",
         { Text = "Select BodyPart", Default = "Head", Values = { "Head", "Random", "HumanoidRootPart" }, Multi = false }
     )
-    SilentAimSection:AddCheckbox("SilentAim/TeamCheck", { Text = "Teamcheck" })
-    SilentAimSection:AddCheckbox("SilentAim/WallCheck", {
+    SilentAimOptions:AddCheckbox("SilentAim/TeamCheck", { Text = "Teamcheck" })
+    SilentAimOptions:AddCheckbox("SilentAim/WallCheck", {
         Text = "Wallcheck",
         Tooltip = "Only locks on to players you could hit from your head: their head or torso has to be in the open. Aims at whichever of the two is",
     })
-    SilentAimSection:AddCheckbox("SilentAim/DrawFov", { Text = "Draw FOV" }):AddColorPicker("SilentAim/DrawFovColor", {
+    SilentAimOptions:AddCheckbox("SilentAim/DrawFov", { Text = "Draw FOV" }):AddColorPicker("SilentAim/DrawFovColor", {
         Default = Color3.fromRGB(255, 255, 255),
         Title = "Draw FOV Color",
         Transparency = 0,
     })
-    SilentAimSection:AddSlider("SilentAim/DrawFovValue", { Text = "Set FOV", Default = 425, Min = 1, Max = 1000 })
-    SilentAimSection:AddSlider("SilentAim/AccuracyValue", { Text = "Set Accuracy", Default = 100, Min = 1, Max = 100 })
-    SilentAimSection:AddLabel("Locked on Color")
+    SilentAimOptions:AddSlider("SilentAim/DrawFovValue", { Text = "Set FOV", Default = 425, Min = 1, Max = 1000 })
+    SilentAimOptions:AddSlider("SilentAim/AccuracyValue", { Text = "Set Accuracy", Default = 100, Min = 1, Max = 100 })
+    SilentAimOptions:AddLabel("Locked on Color")
         :AddColorPicker("SilentAim/Color", { Default = Color3.fromRGB(255, 0, 0), Title = "locked on color" })
 
     local LsSilentAimSection = CombatTab:AddLeftGroupbox("LS Silent Aim")
@@ -14426,28 +17207,30 @@ end,
         Mode = "Hold",
         SyncToggleState = true,
     })
-    LsSilentAimSection:AddCheckbox("LsSilentAim/DrawFov", { Text = "Draw FOV" }):AddColorPicker("LsSilentAim/DrawFovColor", {
+    local LsSilentAimOptions = LsSilentAimSection:AddDependencyBox()
+    LsSilentAimOptions:SetupDependencies({ { Toggles["LsSilentAim"], true } })
+    LsSilentAimOptions:AddCheckbox("LsSilentAim/DrawFov", { Text = "Draw FOV" }):AddColorPicker("LsSilentAim/DrawFovColor", {
         Default = Color3.fromRGB(255, 255, 255),
         Title = "LS FOV Color",
     })
-    LsSilentAimSection:AddSlider("LsSilentAim/FovValue", { Text = "Set FOV", Default = 200, Min = 1, Max = 1000 })
-    LsSilentAimSection:AddCheckbox("LsSilentAim/HighlightTarget", {
+    LsSilentAimOptions:AddSlider("LsSilentAim/FovValue", { Text = "Set FOV", Default = 200, Min = 1, Max = 1000 })
+    LsSilentAimOptions:AddCheckbox("LsSilentAim/HighlightTarget", {
         Text = "Highlight Target",
         Tooltip = "Highlights the selected target through walls",
     }):AddColorPicker("LsSilentAim/HighlightColor", { Default = Color3.fromRGB(255, 0, 0), Title = "LS Target Color" })
-    LsSilentAimSection:AddSlider(
+    LsSilentAimOptions:AddSlider(
         "LsSilentAim/HighlightTransparency",
         { Text = "Highlight Transparency", Default = 0.5, Min = 0, Max = 1, Rounding = 2 }
     )
-    LsSilentAimSection:AddCheckbox("LsSilentAim/Chams", {
+    LsSilentAimOptions:AddCheckbox("LsSilentAim/Chams", {
         Text = "Structure Chams",
         Tooltip = "Shows every structure inside the FOV through walls",
     })
-    LsSilentAimSection:AddSlider(
+    LsSilentAimOptions:AddSlider(
         "LsSilentAim/ChamsTransparency",
         { Text = "Chams Transparency", Default = 0.4, Min = 0, Max = 1, Rounding = 2 }
     )
-    LsSilentAimSection:AddSlider(
+    LsSilentAimOptions:AddSlider(
         "LsSilentAim/WallTransparency",
         { Text = "Gate/Wall/Bridge Transparency", Default = 0.9, Min = 0, Max = 1, Rounding = 2, Tooltip = "How see-through gates, walls and bridges are in the chams" }
     )
@@ -14467,12 +17250,14 @@ end,
         Text = "Rocket Silent Aim",
         Tooltip = "Rockets land where you click: the aim is raised for the rocket's drop over the distance",
     })
-    RocketAimSection:AddCheckbox("RocketSilentAim/Lead", {
+    local RocketAimOptions = RocketAimSection:AddDependencyBox()
+    RocketAimOptions:SetupDependencies({ { Toggles["RocketSilentAim"], true } })
+    RocketAimOptions:AddCheckbox("RocketSilentAim/Lead", {
         Text = "Lead Moving Players",
         Default = true,
         Tooltip = "When you click a player, aims where they'll be when the rocket gets there",
     })
-    RocketAimSection:AddCheckbox("RocketSilentAim/Indicator", {
+    RocketAimOptions:AddCheckbox("RocketSilentAim/Indicator", {
         Text = "Show Impact Point",
         Default = true,
         Tooltip = "Marks where the rocket will hit and shows what's there: its health, the distance and the flight time",
@@ -14480,7 +17265,7 @@ end,
         Title = "Impact Point Color",
         Default = Color3.fromRGB(255, 120, 40),
     })
-    RocketAimSection:AddSlider("RocketSilentAim/IndicatorTransparency", {
+    RocketAimOptions:AddSlider("RocketSilentAim/IndicatorTransparency", {
         Text = "Marker Transparency",
         Default = 0.15,
         Min = 0,
@@ -14488,7 +17273,7 @@ end,
         Rounding = 2,
         Tooltip = "The dot where the rocket will hit and the outline on what's there",
     })
-    RocketAimSection:AddSlider("RocketSilentAim/CardTransparency", {
+    RocketAimOptions:AddSlider("RocketSilentAim/CardTransparency", {
         Text = "Info Card Transparency",
         Default = 0.2,
         Min = 0,
@@ -14499,7 +17284,9 @@ end,
 
     local BoreAimSection = CombatTab:AddRightGroupbox("Bore Aimbot")
     BoreAimSection:AddCheckbox("BoreAimbot", {Text = "Bore Aimbot", Tooltip = "When you aim a bore at another bore, it will automatically reaim towards the tilt assembly of the bore (top)"})
-    BoreAimSection:AddCheckbox("AimAtCenterOfOtherParts", {Text = "Aim at center", Tooltip = "Whether or not aiming a bore will reaim towards the center of a part."})
+    local BoreAimOptions = BoreAimSection:AddDependencyBox()
+    BoreAimOptions:SetupDependencies({ { Toggles["BoreAimbot"], true } })
+    BoreAimOptions:AddCheckbox("AimAtCenterOfOtherParts", {Text = "Aim at center", Tooltip = "Whether or not aiming a bore will reaim towards the center of a part."})
     BoreAimSection:AddCheckbox("BoreTargetBlueprints", {
         Text = "Target Blueprints",
         Default = true,
@@ -14516,6 +17303,17 @@ end,
         Text = "Keep Placing",
         Tooltip = "Stays in placement mode after placing, turned the same way, so you can keep building. E stops",
     })
+    local KeepPlacingOptions = PortafabMods:AddDependencyBox()
+    KeepPlacingOptions:SetupDependencies({ { Toggles["PORTAFAB/KeepPlacing"], true } })
+    KeepPlacingOptions:AddDropdown("PORTAFAB/KeepPlacingBlacklist", {
+        Text = "Don't Keep Placing",
+        Values = structures.getNames(),
+        -- the list comes from the game's own structure templates, so it fits whatever version this is.
+        -- names a version doesn't have are just never matched
+        Default = { "Submersible", "Condensor" },
+        Multi = true,
+        Tooltip = "Structures that end placement like normal after you place one, even with Keep Placing on",
+    })
     PortafabMods:AddCheckbox("PORTAFAB/FastPlacement", {
         Text = "Fast Placement",
         Default = true,
@@ -14523,7 +17321,9 @@ end,
     })
     PortafabMods:AddDivider()
     PortafabMods:AddCheckbox("PORTAFAB/ExtendPipeHitbox", { Text = "Extend Pipe Hitbox" })
-    PortafabMods:AddSlider(
+    local PipeHitboxOptions = PortafabMods:AddDependencyBox()
+    PipeHitboxOptions:SetupDependencies({ { Toggles["PORTAFAB/ExtendPipeHitbox"], true } })
+    PipeHitboxOptions:AddSlider(
         "PORTAFAB/ExtendPipeHitboxSize",
         { Text = "Set Hitbox Size", Default = 1.9, Min = 1.9, Max = 5, Rounding = 2, Tooltip = "2.5 to 3.5 Is good" }
     )
@@ -14533,15 +17333,17 @@ end,
         Text = "Enable Quick Build",
         Tooltip = "Each slot's key starts placing its structure straight away, no menu",
     })
-    QuickBuild:AddCheckbox("QuickBuild/AutoEquip", {
+    local QuickBuildOptions = QuickBuild:AddDependencyBox()
+    QuickBuildOptions:SetupDependencies({ { Toggles["QuickBuild"], true } })
+    QuickBuildOptions:AddCheckbox("QuickBuild/AutoEquip", {
         Text = "Auto Equip Portafab",
         Default = true,
         Tooltip = "Takes the portafab out when a slot's key is pressed while it's put away",
     })
-    QuickBuild:AddDivider()
+    QuickBuildOptions:AddDivider()
     local structureNames = structures.getNames()
     for slot = 1, QUICK_BUILD_SLOTS do
-        QuickBuild:AddDropdown(string.format('QuickBuild/Slot%s', tostring(slot)), {
+        QuickBuildOptions:AddDropdown(string.format('QuickBuild/Slot%s', tostring(slot)), {
             Text = string.format('Slot %s', tostring(slot)),
             Values = structureNames,
             Tooltip = "Click the key on the right to bind it",
@@ -14556,8 +17358,10 @@ end,
 
     local AutoStuff = AutoTab:AddLeftGroupbox("Auto")
     AutoStuff:AddCheckbox("AutoDCap", {Text = "Auto DCap"})
-    AutoStuff:AddSlider("AutoDCapDelay", { Text = "AutoDCapDelay", Default = 0.1, Min = 0, Max = 1, Rounding = 2 })
-    AutoStuff:AddDropdown("AutoDCapDropdown", {
+    local DCapOptions = AutoStuff:AddDependencyBox()
+    DCapOptions:SetupDependencies({ { Toggles["AutoDCap"], true } })
+    DCapOptions:AddSlider("AutoDCapDelay", { Text = "AutoDCapDelay", Default = 0.1, Min = 0, Max = 1, Rounding = 2 })
+    DCapOptions:AddDropdown("AutoDCapDropdown", {
         Text = "Select Structures",
         Multi = true,
         Values = {
@@ -14578,16 +17382,19 @@ end,
 
     local ArtillerySection = VisualTab:AddLeftGroupbox("Artillery")
     ArtillerySection:AddCheckbox("artyVisual", { Text = "Arty Trajectory Visual" })
-    ArtillerySection:AddLabel("Artillery Color"):AddColorPicker("artyVisualColor", {
+    local ArtyColorOptions = ArtillerySection:AddDependencyBox()
+    ArtyColorOptions:SetupDependencies({ { Toggles["artyVisual"], true } })
+    ArtyColorOptions:AddLabel("Artillery Color"):AddColorPicker("artyVisualColor", {
         Default = Color3.fromRGB(60, 255, 0),
         Title = "Artillery Color",
         Transparency = 0,
     })
-    ArtillerySection:AddSlider(
+    local ArtyStyleOptions = ArtillerySection:AddDependencyBox()
+    ArtyStyleOptions:AddSlider(
         "artyVisualSize",
         { Text = "Set Arty Size", Default = 0.1, Min = 0.05, Max = 5, Rounding = 2 }
     )
-    ArtillerySection:AddSlider(
+    ArtyStyleOptions:AddSlider(
         "artyVisualTransparency",
         { Text = "Set Arty Transparency", Default = 0, Min = 0, Max = 1, Rounding = 2 }
     )
@@ -14597,10 +17404,15 @@ end,
     })
     otherArtyToggle:AddColorPicker("EnemyArtyColor", { Title = "Enemy Arty Color", Default = Color3.fromRGB(255, 0, 0) })
     otherArtyToggle:AddColorPicker("FriendlyArtyColor", { Title = "Friendly Arty Color", Default = Color3.fromRGB(0, 170, 255) })
+    -- the size and transparency are shared by both arcs, so they show while either is on. set up here,
+    -- once the Other Players' Arty switch exists
+    ArtyStyleOptions:SetupDependencies({ { Toggles["artyVisual"], true }, { Toggles["OtherArtyVisual"], true } }, true)
 
     local PlayerVisualSection = VisualTab:AddRightGroupbox("Players")
     PlayerVisualSection:AddCheckbox("playersVisual", { Text = "Players Visual" })
-    PlayerVisualSection:AddDropdown("playersVisualLists", {
+    local PlayerVisualOptions = PlayerVisualSection:AddDependencyBox()
+    PlayerVisualOptions:SetupDependencies({ { Toggles["playersVisual"], true } })
+    PlayerVisualOptions:AddDropdown("playersVisualLists", {
         Text = "Select to ESP",
         Default = { "Highlight", "Name", "Health", "Distance", "Box" },
         Values = {
@@ -14615,35 +17427,37 @@ end,
         },
         Multi = true,
     })
-    local orbitalColorsLabel = PlayerVisualSection:AddLabel("LS / OS Count Colors")
+    local orbitalColorsLabel = PlayerVisualOptions:AddLabel("LS / OS Count Colors")
     orbitalColorsLabel:AddColorPicker("EspLsColor", { Title = "LS Count Color", Default = Color3.fromRGB(255, 170, 0) })
     orbitalColorsLabel:AddColorPicker("EspOsColor", { Title = "OS Count Color", Default = Color3.fromRGB(0, 170, 255) })
-    PlayerVisualSection:AddLabel("Label Color")
+    PlayerVisualOptions:AddLabel("Label Color")
         :AddColorPicker("LabelColor", { Title = "Label Color", Default = Color3.fromRGB(255, 255, 255) })
-    PlayerVisualSection:AddLabel("Box Color")
+    PlayerVisualOptions:AddLabel("Box Color")
         :AddColorPicker("BoxColor", { Title = "Box Color", Default = Color3.fromRGB(119, 255, 28) })
-    PlayerVisualSection:AddCheckbox("playersVisualUseTeamColor", { Text = "Use Team Color" })
-    PlayerVisualSection:AddCheckbox("playersVisualTeamcheck", { Text = "Teamcheck" })
-    PlayerVisualSection:AddCheckbox("playersVisualWallCheck", {
+    PlayerVisualOptions:AddCheckbox("playersVisualUseTeamColor", { Text = "Use Team Color" })
+    PlayerVisualOptions:AddCheckbox("playersVisualTeamcheck", { Text = "Teamcheck" })
+    PlayerVisualOptions:AddCheckbox("playersVisualWallCheck", {
         Text = "Wallcheck",
         Tooltip = "Players behind walls (head and torso both hidden from your camera) are drawn in this color",
     }):AddColorPicker("EspOccludedColor", { Title = "Behind Wall Color", Default = Color3.fromRGB(140, 140, 160) })
-    PlayerVisualSection:AddCheckbox("playersVisualHideOccluded", {
+    local HideOccludedOptions = PlayerVisualOptions:AddDependencyBox()
+    HideOccludedOptions:SetupDependencies({ { Toggles["playersVisualWallCheck"], true } })
+    HideOccludedOptions:AddCheckbox("playersVisualHideOccluded", {
         Text = "Hide Players Behind Walls",
         Tooltip = "With wallcheck on, only players you can see get an ESP",
     })
-    PlayerVisualSection:AddDivider()
-    PlayerVisualSection:AddSlider("EspTextSize", { Text = "Text Size", Default = 18, Min = 8, Max = 32, Rounding = 0, Suffix = "px" })
-    PlayerVisualSection:AddSlider("EspFillTransparency", {
+    PlayerVisualOptions:AddDivider()
+    PlayerVisualOptions:AddSlider("EspTextSize", { Text = "Text Size", Default = 18, Min = 8, Max = 32, Rounding = 0, Suffix = "px" })
+    PlayerVisualOptions:AddSlider("EspFillTransparency", {
         Text = "Highlight Fill Transparency",
         Default = 0.4,
         Min = 0,
         Max = 1,
         Rounding = 2,
     })
-    PlayerVisualSection:AddLabel("Highlight Outline Color")
+    PlayerVisualOptions:AddLabel("Highlight Outline Color")
         :AddColorPicker("EspOutlineColor", { Title = "Highlight Outline Color", Default = Color3.fromRGB(255, 255, 255) })
-    PlayerVisualSection:AddSlider("EspOutlineTransparency", {
+    PlayerVisualOptions:AddSlider("EspOutlineTransparency", {
         Text = "Highlight Outline Transparency",
         Default = 0,
         Min = 0,
@@ -14663,7 +17477,9 @@ end,
             "HeighLimitColor",
             { Title = "Height ESP Color", Default = Color3.fromRGB(255, 0, 0) }
         )
-    UtilityVisualSection:AddSlider("HeightlimitSize", { Text = "Height Limit ESP Size", Default = 2, Min = 1, Max = 30 })
+    local HeightLimitOptions = UtilityVisualSection:AddDependencyBox()
+    HeightLimitOptions:SetupDependencies({ { Toggles["HeightLimitESP"], true } })
+    HeightLimitOptions:AddSlider("HeightlimitSize", { Text = "Height Limit ESP Size", Default = 2, Min = 1, Max = 30 })
     UtilityVisualSection:AddDivider()
 
     UtilityVisualSection:AddCheckbox("BeaconSpotESP", { Text = "Beacon Spot ESP" })
@@ -14681,13 +17497,15 @@ end,
         Mode = "Toggle",
         SyncToggleState = true,
     })
-    SpawnEspSection:AddDropdown("SpawnESP/Teams", {
+    local SpawnEspOptions = SpawnEspSection:AddDependencyBox()
+    SpawnEspOptions:SetupDependencies({ { Toggles["SpawnESP"], true } })
+    SpawnEspOptions:AddDropdown("SpawnESP/Teams", {
         Text = "Show Spawns Of",
         Default = { "My Team", "Enemy Teams" },
         Values = { "My Team", "Enemy Teams" },
         Multi = true,
     })
-    SpawnEspSection:AddSlider("SpawnESP/Opacity", {
+    SpawnEspOptions:AddSlider("SpawnESP/Opacity", {
         Text = "Idle Opacity",
         Default = 0.5,
         Min = 0.1,
@@ -14695,15 +17513,15 @@ end,
         Rounding = 2,
         Tooltip = "How visible markers are until your cursor comes near them",
     })
-    SpawnEspSection:AddCheckbox("SpawnESP/Group", {
+    SpawnEspOptions:AddCheckbox("SpawnESP/Group", {
         Text = "Group Overlapping Markers",
         Default = true,
         Tooltip = "Markers on top of each other fold into one with a +N count. Point at the group to spread it out",
     })
-    SpawnEspSection:AddDivider()
-    SpawnEspSection:AddSlider("SpawnESP/MarkerSize", { Text = "Marker Size", Default = 4.5, Min = 2, Max = 14, Rounding = 1, Suffix = "px" })
-    SpawnEspSection:AddSlider("SpawnESP/TextSize", { Text = "Number Size", Default = 13, Min = 8, Max = 26, Rounding = 0, Suffix = "px" })
-    SpawnEspSection:AddSlider("SpawnESP/Height", {
+    SpawnEspOptions:AddDivider()
+    SpawnEspOptions:AddSlider("SpawnESP/MarkerSize", { Text = "Marker Size", Default = 4.5, Min = 2, Max = 14, Rounding = 1, Suffix = "px" })
+    SpawnEspOptions:AddSlider("SpawnESP/TextSize", { Text = "Number Size", Default = 13, Min = 8, Max = 26, Rounding = 0, Suffix = "px" })
+    SpawnEspOptions:AddSlider("SpawnESP/Height", {
         Text = "Height Above Pad",
         Default = 3.5,
         Min = 0,
@@ -14711,7 +17529,7 @@ end,
         Rounding = 1,
         Suffix = " studs",
     })
-    SpawnEspSection:AddSlider("SpawnESP/GroupRadius", {
+    SpawnEspOptions:AddSlider("SpawnESP/GroupRadius", {
         Text = "Group Distance",
         Default = 20,
         Min = 4,
@@ -14720,7 +17538,7 @@ end,
         Suffix = "px",
         Tooltip = "How close markers have to be on screen to fold into one",
     })
-    SpawnEspSection:AddSlider("SpawnESP/FocusRadius", {
+    SpawnEspOptions:AddSlider("SpawnESP/FocusRadius", {
         Text = "Cursor Reveal Distance",
         Default = 60,
         Min = 10,
@@ -14729,7 +17547,7 @@ end,
         Suffix = "px",
         Tooltip = "Markers this close to your cursor brighten, spread out of their group, and the nearest one shows its details",
     })
-    SpawnEspSection:AddSlider("SpawnESP/HideWithin", {
+    SpawnEspOptions:AddSlider("SpawnESP/HideWithin", {
         Text = "Hide Spawns Within",
         Default = 20,
         Min = 0,
@@ -14738,33 +17556,104 @@ end,
         Suffix = " studs",
         Tooltip = "Spawns this close to your camera aren't marked, since you can already see them",
     })
-    SpawnEspSection:AddLabel("Number Color")
+    SpawnEspOptions:AddLabel("Number Color")
         :AddColorPicker("SpawnESP/LabelColor", { Title = "Spawn Number Color", Default = Color3.fromRGB(235, 240, 248) })
-    SpawnEspSection:AddCheckbox("SpawnESP/CustomColors", {
+    SpawnEspOptions:AddCheckbox("SpawnESP/CustomColors", {
         Text = "Custom Marker Colors",
         Tooltip = "Uses these two colors instead of each team's color",
     })
         :AddColorPicker("SpawnESP/MyColor", { Title = "My Team's Spawns", Default = Color3.fromRGB(34, 228, 255) })
         :AddColorPicker("SpawnESP/EnemyColor", { Title = "Enemy Spawns", Default = Color3.fromRGB(255, 94, 110) })
 
+    local WorldSettings = VisualTab:AddRightGroupbox("World")
+    WorldSettings:AddCheckbox("World/NoFog", {
+        Text = "No Fog",
+        Tooltip = "Clears the haze so you can see across the map. Turning it off brings the game's fog back",
+    })
+    WorldSettings:AddCheckbox("World/Daytime", {
+        Text = "Daytime",
+        Tooltip = "Holds the clock at the time below. Turning it off gives the game its own time back",
+    })
+    local DaytimeOptions = WorldSettings:AddDependencyBox()
+    DaytimeOptions:SetupDependencies({ { Toggles["World/Daytime"], true } })
+    DaytimeOptions:AddSlider("World/ClockTime", {
+        Text = "Time of Day",
+        Default = 14,
+        Min = 0,
+        Max = 24,
+        Rounding = 1,
+        Suffix = "h",
+    })
+
+    local TracerSection = VisualTab:AddLeftGroupbox("Gun Tracers")
+    TracerSection:AddCheckbox("Tracers", {
+        Text = "Custom Tracers",
+        Tooltip = "Recolors and resizes the streak every gun shot leaves, and can leave a line over the whole shot that fades out",
+    }):AddColorPicker("Tracers/Color", { Title = "Tracer Color", Default = Color3.fromRGB(245, 205, 48) })
+    local TracerOptions = TracerSection:AddDependencyBox()
+    TracerOptions:SetupDependencies({ { Toggles["Tracers"], true } })
+    TracerOptions:AddSlider("Tracers/Thickness", { Text = "Thickness", Default = 0.25, Min = 0.05, Max = 2, Rounding = 2, Suffix = " studs" })
+    TracerOptions:AddSlider("Tracers/Opacity", { Text = "Opacity", Default = 1, Min = 0.05, Max = 1, Rounding = 2 })
+    TracerOptions:AddCheckbox("Tracers/Neon", {
+        Text = "Neon Tracers",
+        Default = true,
+        Tooltip = "Tracers glow, so they stand out at night. Fog still covers them; Draw Over Fog doesn't",
+    })
+    TracerOptions:AddCheckbox("Tracers/Overlay", {
+        Text = "Draw Over Fog",
+        Tooltip = "Draws the lasting lines on your screen instead of in the world, so fog, night and walls never hide them",
+    })
+    TracerOptions:AddSlider("Tracers/Duration", {
+        Text = "Line Duration",
+        Default = 0.4,
+        Min = 0,
+        Max = 3,
+        Rounding = 2,
+        Suffix = "s",
+        Tooltip = "How long a line over the whole shot stays, fading out. 0 only restyles the game's own streak (gone in a blink)",
+    })
+    TracerSection:AddCheckbox("Tracers/Impact", {
+        Text = "Impact Color",
+        Tooltip = "Recolors the sparks where a shot lands",
+    }):AddColorPicker("Tracers/ImpactColor", { Title = "Impact Color", Default = Color3.fromRGB(3, 181, 184) })
+    TracerSection:AddCheckbox("Tracers/Muzzle", {
+        Text = "Muzzle Flash Color",
+        Tooltip = "Recolors the flash and light at the gun's barrel when it fires",
+    }):AddColorPicker("Tracers/MuzzleColor", { Title = "Muzzle Flash Color", Default = Color3.fromRGB(245, 205, 48) })
+    local ApplyToOptions = TracerSection:AddDependencyBox()
+    ApplyToOptions:SetupDependencies({ { Toggles["Tracers"], true }, { Toggles["Tracers/Muzzle"], true } }, true)
+    ApplyToOptions:AddDropdown("Tracers/ApplyTo", {
+        Text = "Apply To",
+        Default = { "My Shots", "Other Players" },
+        Values = { "My Shots", "Other Players" },
+        Multi = true,
+        Tooltip = "Whose tracers and muzzle flashes change. The portafab's build beam never does",
+    })
+
     local OrbitalVisualsSection = VisualTab:AddRightGroupbox("Orbitals")
     OrbitalVisualsSection:AddCheckbox("OsVisualizer", { Text = "OS Visualizer", Tooltip = "Shows where your orbital shield will land, red when out of range" })
         :AddColorPicker("OsVisualizerColor", { Title = "OS Visualizer Color", Default = Color3.fromRGB(0, 170, 255) })
-    OrbitalVisualsSection:AddSlider(
+    local OsOptions = OrbitalVisualsSection:AddDependencyBox()
+    OsOptions:SetupDependencies({ { Toggles["OsVisualizer"], true } })
+    OsOptions:AddSlider(
         "OsVisualizerTransparency",
         { Text = "OS Transparency", Default = 0.7, Min = 0, Max = 1, Rounding = 2 }
     )
     OrbitalVisualsSection:AddDivider()
     OrbitalVisualsSection:AddCheckbox("LsVisualizer", { Text = "LS Visualizer", Tooltip = "Shows where your laser strike will land, red when out of range" })
         :AddColorPicker("LsVisualizerColor", { Title = "LS Visualizer Color", Default = Color3.fromRGB(255, 170, 0) })
-    OrbitalVisualsSection:AddSlider(
+    local LsOptions = OrbitalVisualsSection:AddDependencyBox()
+    LsOptions:SetupDependencies({ { Toggles["LsVisualizer"], true } })
+    LsOptions:AddSlider(
         "LsVisualizerTransparency",
         { Text = "LS Transparency", Default = 0.3, Min = 0, Max = 1, Rounding = 2 }
     )
     OrbitalVisualsSection:AddDivider()
     OrbitalVisualsSection:AddCheckbox("LsThreatRings", { Text = "Enemy LS Range", Tooltip = "Rings the area every enemy holding a laser strike can hit" })
         :AddColorPicker("LsThreatRingsColor", { Title = "Enemy LS Range Color", Default = Color3.fromRGB(255, 60, 60) })
-    OrbitalVisualsSection:AddSlider(
+    local LsThreatOptions = OrbitalVisualsSection:AddDependencyBox()
+    LsThreatOptions:SetupDependencies({ { Toggles["LsThreatRings"], true } })
+    LsThreatOptions:AddSlider(
         "LsThreatRingsTransparency",
         { Text = "Enemy LS Range Transparency", Default = 0.5, Min = 0, Max = 1, Rounding = 2 }
     )
@@ -14778,7 +17667,13 @@ end,
         Text = "Crystal Color",
         Tooltip = "Recolors the iridium crystals on the map and their light. The crystal itself is drawn a shade darker than its glow",
     }):AddColorPicker("IridiumColors/CrystalColor", { Title = "Crystal Color", Default = Color3.fromRGB(0, 255, 255) })
-    IridiumColorSection:AddSlider("IridiumColors/GlowBrightness", {
+    IridiumColorSection:AddCheckbox("IridiumColors/Sea", {
+        Text = "Sea Color",
+        Tooltip = "Recolors the iridium sea and the particles rising off it",
+    }):AddColorPicker("IridiumColors/SeaColor", { Title = "Sea Color", Default = Color3.fromRGB(18, 238, 212) })
+    local IridiumOptions = IridiumColorSection:AddDependencyBox()
+    IridiumOptions:SetupDependencies({ { Toggles["IridiumColors/Tanks"], true }, { Toggles["IridiumColors/Crystals"], true }, { Toggles["IridiumColors/Sea"], true } }, true)
+    IridiumOptions:AddSlider("IridiumColors/GlowBrightness", {
         Text = "Glow Brightness",
         Default = 1,
         Min = 0,
@@ -14787,7 +17682,7 @@ end,
         Suffix = "x",
         Tooltip = "Scales the light recolored tanks and crystals give off. 1x is the game's own brightness",
     })
-    IridiumColorSection:AddSlider("IridiumColors/CrystalShade", {
+    IridiumOptions:AddSlider("IridiumColors/CrystalShade", {
         Text = "Crystal Body Shade",
         Default = 0.6,
         Min = 0.1,
@@ -14819,6 +17714,25 @@ end,
         :AddColorPicker("BoreFlareColorOne", { Title = "Bore Flare Color (Start)", Default = Color3.fromRGB(0, 0, 255) })
         :AddColorPicker("BoreFlareColorTwo", { Title = "Bore Flare Color (End)", Default = Color3.fromRGB(0, 255, 255) })
 
+    local SkySection = ColorTab:AddLeftGroupbox("Skybox")
+    SkySection:AddCheckbox("Sky/Custom", { Text = "Custom Sky", Tooltip = "Off gives the game's own sky back" })
+    local SkyOptions = SkySection:AddDependencyBox()
+    SkyOptions:SetupDependencies({ { Toggles["Sky/Custom"], true } })
+    SkyOptions:AddDropdown("Sky/Preset", {
+        Text = "Sky",
+        Values = { "Classic", "Custom Image" },
+        Default = "Classic",
+        AllowNull = false,
+    })
+    SkyOptions:AddInput("Sky/ImageId", {
+        Text = "Image ID",
+        Placeholder = "a decal or image id, for Custom Image",
+        Finished = true,
+    })
+    SkyOptions:AddCheckbox("Sky/HideSunMoon", { Text = "Hide Sun And Moon" })
+    SkyOptions:AddSlider("Sky/Stars", { Text = "Stars", Default = 200, Min = 0, Max = 3000, Rounding = 0 })
+    SkyOptions:AddLabel([[<font color="#707e96">the haze covers the sky; No Fog shows it all</font>]])
+
     local LightingSection = ColorTab:AddRightGroupbox("Lighting")
     LightingSection:AddCheckbox("Lighting/Custom", {
         Text = "Custom Lighting",
@@ -14826,21 +17740,27 @@ end,
     })
         :AddColorPicker("Lighting/Ambient", { Title = "Shadow Color (Indoors)", Default = Color3.fromRGB(60, 60, 72) })
         :AddColorPicker("Lighting/OutdoorAmbient", { Title = "Shadow Color (Outdoors)", Default = Color3.fromRGB(127, 127, 147) })
-    LightingSection:AddSlider("Lighting/Brightness", { Text = "Sun Brightness", Default = 2, Min = 0, Max = 10, Rounding = 1 })
-    LightingSection:AddSlider("Lighting/Exposure", { Text = "Exposure", Default = 0, Min = -3, Max = 3, Rounding = 1 })
+    local LightingOptions = LightingSection:AddDependencyBox()
+    LightingOptions:SetupDependencies({ { Toggles["Lighting/Custom"], true } })
+    LightingOptions:AddSlider("Lighting/Brightness", { Text = "Sun Brightness", Default = 2, Min = 0, Max = 10, Rounding = 1 })
+    LightingOptions:AddSlider("Lighting/Exposure", { Text = "Exposure", Default = 0, Min = -3, Max = 3, Rounding = 1 })
     LightingSection:AddDivider()
     LightingSection:AddCheckbox("Lighting/ColorCorrection", {
         Text = "Color Correction",
         Tooltip = "A color filter over the whole screen, on top of the game's own",
     }):AddColorPicker("Lighting/Tint", { Title = "Screen Tint", Default = Color3.fromRGB(255, 255, 255) })
-    LightingSection:AddSlider("Lighting/CCBrightness", { Text = "Brightness", Default = 0, Min = -0.5, Max = 0.5, Rounding = 2 })
-    LightingSection:AddSlider("Lighting/Contrast", { Text = "Contrast", Default = 0, Min = -1, Max = 1, Rounding = 2 })
-    LightingSection:AddSlider("Lighting/Saturation", { Text = "Saturation", Default = 0, Min = -1, Max = 1, Rounding = 2 })
+    local ColorCorrectionOptions = LightingSection:AddDependencyBox()
+    ColorCorrectionOptions:SetupDependencies({ { Toggles["Lighting/ColorCorrection"], true } })
+    ColorCorrectionOptions:AddSlider("Lighting/CCBrightness", { Text = "Brightness", Default = 0, Min = -0.5, Max = 0.5, Rounding = 2 })
+    ColorCorrectionOptions:AddSlider("Lighting/Contrast", { Text = "Contrast", Default = 0, Min = -1, Max = 1, Rounding = 2 })
+    ColorCorrectionOptions:AddSlider("Lighting/Saturation", { Text = "Saturation", Default = 0, Min = -1, Max = 1, Rounding = 2 })
     LightingSection:AddDivider()
     LightingSection:AddCheckbox("Lighting/Bloom", { Text = "Bloom", Tooltip = "Makes bright things like neon and iridium glow" })
-    LightingSection:AddSlider("Lighting/BloomIntensity", { Text = "Bloom Intensity", Default = 0.6, Min = 0, Max = 3, Rounding = 2 })
-    LightingSection:AddSlider("Lighting/BloomSize", { Text = "Bloom Size", Default = 24, Min = 0, Max = 56, Rounding = 0 })
-    LightingSection:AddSlider("Lighting/BloomThreshold", {
+    local BloomOptions = LightingSection:AddDependencyBox()
+    BloomOptions:SetupDependencies({ { Toggles["Lighting/Bloom"], true } })
+    BloomOptions:AddSlider("Lighting/BloomIntensity", { Text = "Bloom Intensity", Default = 0.6, Min = 0, Max = 3, Rounding = 2 })
+    BloomOptions:AddSlider("Lighting/BloomSize", { Text = "Bloom Size", Default = 24, Min = 0, Max = 56, Rounding = 0 })
+    BloomOptions:AddSlider("Lighting/BloomThreshold", {
         Text = "Bloom Threshold",
         Default = 1,
         Min = 0,
@@ -14856,6 +17776,176 @@ end,
         :AddColorPicker("Lighting/HazeColor", { Title = "Haze Color", Default = Color3.fromRGB(0, 190, 200) })
         :AddColorPicker("Lighting/DecayColor", { Title = "Haze Color (Far)", Default = Color3.fromRGB(0, 40, 145) })
 
+    local KillFeedSection = FunTab:AddLeftGroupbox("Kill Feed")
+    KillFeedSection:AddCheckbox("KillFeed", {
+        Text = "Kill Feed",
+        Tooltip = "Counter strike style: who killed who with what, top right. Lines with you in them get a red edge",
+    })
+    local KillFeedOptions = KillFeedSection:AddDependencyBox()
+    KillFeedOptions:SetupDependencies({ { Toggles["KillFeed"], true } })
+    KillFeedOptions:AddCheckbox("KillFeed/OnlyMine", { Text = "Only Lines With Me" })
+    KillFeedOptions:AddSlider("KillFeed/Scale", { Text = "Size", Default = 1, Min = 0.6, Max = 1.6, Rounding = 2, Suffix = "x" })
+
+    local AnnouncerSection = FunTab:AddLeftGroupbox("Announcer")
+    AnnouncerSection:AddCheckbox("Announcer", {
+        Text = "Killstreak Announcer",
+        Tooltip = "Counts your kills in one life: the 2nd is a double kill, the 3rd a triple kill and so on, up to godlike. Dying starts over",
+    })
+    local AnnouncerOptions = AnnouncerSection:AddDependencyBox()
+    AnnouncerOptions:SetupDependencies({ { Toggles.Announcer, true } })
+    AnnouncerOptions:AddCheckbox("Announcer/Voice", { Text = "Say It Out Loud", Default = true })
+    AnnouncerOptions:AddDropdown("Announcer/Pack", {
+        Text = "Voice",
+        Values = { "Unreal Tournament", "Robot" },
+        Default = "Unreal Tournament",
+        AllowNull = false,
+        Tooltip = "Unreal Tournament: the real announcer clips. Robot: roblox text to speech",
+    })
+    local RobotOptions = AnnouncerOptions:AddDependencyBox()
+    RobotOptions:SetupDependencies({ { Options["Announcer/Pack"], "Robot" } })
+    RobotOptions:AddDropdown("Announcer/VoiceId", {
+        Text = "Robot Voice",
+        Values = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11" },
+        Default = "1",
+        AllowNull = false,
+        FormatDisplayValue = function(value)
+            return string.format('Voice %s', tostring(value))        
+end,
+    })
+    RobotOptions:AddSlider("Announcer/Speed", { Text = "Voice Speed", Default = 1, Min = 0.5, Max = 2, Rounding = 2, Suffix = "x" })
+    AnnouncerOptions:AddSlider("Announcer/Volume", { Text = "Volume", Default = 1, Min = 0, Max = 3, Rounding = 2 })
+    AnnouncerOptions:AddCheckbox("Announcer/Flash", {
+        Text = "Flash It On Screen",
+        Default = true,
+        Tooltip = "The line pops up big at the top of the screen for a second",
+    }):AddColorPicker("Announcer/FlashColor", { Title = "Flash Color", Default = Color3.fromRGB(255, 70, 50) })
+    AnnouncerOptions:AddButton({
+        Text = "Test",
+        Func = function()
+            announcerTestCall:Fire()
+        end,
+    })
+
+    local HitSection = FunTab:AddRightGroupbox("Hit Feedback")
+    HitSection:AddCheckbox("HitSound", { Text = "Hit Sound", Tooltip = "Plays when one of your shots lands on a player" })
+    local HitSoundOptions = HitSection:AddDependencyBox()
+    HitSoundOptions:SetupDependencies({ { Toggles.HitSound, true } })
+    HitSoundOptions:AddDropdown("HitSound/Preset", {
+        Text = "Sound",
+        Values = sounds.PRESET_NAMES,
+        Default = "Ping",
+        AllowNull = false,
+    })
+    local CustomSoundOptions = HitSoundOptions:AddDependencyBox()
+    CustomSoundOptions:SetupDependencies({ { Options["HitSound/Preset"], "Custom" } })
+    CustomSoundOptions:AddInput("HitSound/CustomId", {
+        Text = "Custom Sound ID",
+        Placeholder = "an audio id",
+        Finished = true,
+    })
+    HitSoundOptions:AddSlider("HitSound/Volume", { Text = "Volume", Default = 0.6, Min = 0, Max = 2, Rounding = 2 })
+    HitSoundOptions:AddSlider("HitSound/Pitch", { Text = "Pitch", Default = 1, Min = 0.5, Max = 2, Rounding = 2, Suffix = "x" })
+    HitSoundOptions:AddButton({
+        Text = "Test Sound",
+        Func = function()
+            sounds.play(
+                sounds.resolve(Options["HitSound/Preset"].Value, Options["HitSound/CustomId"].Value),
+                Options["HitSound/Volume"].Value,
+                Options["HitSound/Pitch"].Value
+            )
+        end,
+    })
+    HitSection:AddDivider()
+    HitSection:AddCheckbox("HitMarker", { Text = "Hit Marker", Tooltip = "Ticks around the cursor when you hit someone" })
+        :AddColorPicker("HitMarker/Color", { Title = "Hit Marker Color", Default = Color3.fromRGB(255, 255, 255) })
+    local HitMarkerOptions = HitSection:AddDependencyBox()
+    HitMarkerOptions:SetupDependencies({ { Toggles["HitMarker"], true } })
+    HitMarkerOptions:AddSlider("HitMarker/Size", { Text = "Hit Marker Size", Default = 8, Min = 3, Max = 24, Rounding = 0, Suffix = "px" })
+
+    local DamageSection = FunTab:AddRightGroupbox("Damage Numbers")
+    DamageSection:AddCheckbox("DamageNumbers", {
+        Text = "Damage Numbers",
+        Tooltip = "Numbers float up off players as they take damage. Quick hits add up into one number",
+    }):AddColorPicker("DamageNumbers/Color", { Title = "Number Color", Default = Color3.fromRGB(255, 220, 80) })
+    local DamageOptions = DamageSection:AddDependencyBox()
+    DamageOptions:SetupDependencies({ { Toggles["DamageNumbers"], true } })
+    DamageOptions:AddCheckbox("DamageNumbers/OnlyMine", { Text = "Only My Damage", Default = true })
+    DamageOptions:AddSlider("DamageNumbers/Size", { Text = "Size", Default = 18, Min = 10, Max = 36, Rounding = 0, Suffix = "px" })
+
+    local SkinSection = SkinTab:AddLeftGroupbox("Skin")
+    SkinSection:AddCheckbox("Skins", {
+        Text = "Custom Skins",
+        Tooltip = "Puts a picture on your guns, like the game's own skins. Only you see it",
+    }):AddColorPicker("Skins/Tint", { Title = "Skin Tint", Default = Color3.fromRGB(255, 255, 255) })
+    local SkinOptions = SkinSection:AddDependencyBox()
+    SkinOptions:SetupDependencies({ { Toggles["Skins"], true } })
+    SkinOptions:AddDropdown("Skins/Every", {
+        Text = "Every Gun",
+        Values = Skins.skinKeys(false),
+        RichText = true,
+        FormatDisplayValue = Skins.displaySkin,
+        Tooltip = "Puts this skin on every gun you have. A gun's own pick below wins",
+    })
+    local EveryCustomOptions = SkinOptions:AddDependencyBox()
+    EveryCustomOptions:SetupDependencies({ { Options["Skins/Every"], Skins.CUSTOM } })
+    EveryCustomOptions:AddInput("Skins/AllGuns", {
+        Text = "Image ID",
+        Placeholder = "a decal or image id",
+        Finished = true,
+    })
+    SkinOptions:AddLabel([[<font color="#707e96">the game's skins, with their tier in the shop's color</font>]])
+
+    local NeonSection = SkinTab:AddLeftGroupbox("Neon")
+    NeonSection:AddCheckbox("Skins/Neon", { Text = "Neon Guns", Tooltip = "Makes your guns glow" })
+        :AddColorPicker("Skins/NeonColor", { Title = "Neon Color", Default = Color3.fromRGB(34, 228, 255) })
+    local NeonOptions = NeonSection:AddDependencyBox()
+    NeonOptions:SetupDependencies({ { Toggles["Skins/Neon"], true } })
+    NeonOptions:AddCheckbox("Skins/KeepColors", {
+        Text = "Keep Gun Colors",
+        Default = true,
+        Tooltip = "Glow in the gun's base colors. Off uses the neon color. Neon takes the skin picture off while it's on",
+    })
+    NeonOptions:AddCheckbox("Skins/NeonOutline", {
+        Text = "Glowing Edge",
+        Default = true,
+        Tooltip = "A bright edge in the neon color (and a fill, with Keep Gun Colors off), so the gun reads as glowing in this game's lighting",
+    })
+    NeonOptions:AddSlider("Skins/Glow", {
+        Text = "Glow Brightness",
+        Default = 0,
+        Min = 0,
+        Max = 4,
+        Rounding = 1,
+        Tooltip = "A light around the gun in the neon color. 0 is none",
+    })
+
+    local gunNames = Skins.gunNames()
+    local half = math.ceil(#gunNames / 2)
+    local PerGunLeft = SkinTab:AddLeftGroupbox("Per Gun")
+    local PerGunRight = SkinTab:AddRightGroupbox("Per Gun")
+    -- the per gun pictures only matter with skins on
+    PerGunLeft:SetupDependencies({ { Toggles.Skins, true } })
+    PerGunRight:SetupDependencies({ { Toggles.Skins, true } })
+    local perGunSkins = Skins.skinKeys(true)
+    for index, gun in gunNames do
+        local box = (index <= half and{PerGunLeft }or{PerGunRight
+})[1]        box:AddDropdown(string.format('Skins/Gun/%s', tostring(gun)), {
+            Text = gun,
+            Values = perGunSkins,
+            Default = Skins.EVERY_GUN,
+            AllowNull = false,
+            RichText = true,
+            FormatDisplayValue = Skins.displaySkin,
+        })
+        local customBox = box:AddDependencyBox()
+        customBox:SetupDependencies({ { Options[string.format('Skins/Gun/%s', tostring(gun))], Skins.CUSTOM } })
+        customBox:AddInput(string.format('Skins/GunId/%s', tostring(gun)), {
+            Text = string.format('%s Image ID', tostring(gun)),
+            Placeholder = "a decal or image id",
+            Finished = true,
+        })
+    end
+
     -- match stats: the board fills the Match tab, the score weights live in Settings
     local tracker = Tracker.new()
     tracker:start()
@@ -14868,6 +17958,7 @@ end,
         end)
     end)
 
+    window:AddCategory("Client")
     local SettingsTab = window:AddSettingsTab()
 
     local MatchSettings = SettingsTab:AddLeftGroupbox("Match Stats")
@@ -14885,24 +17976,6 @@ end,
         end,
     })
 
-    local WorldSettings = SettingsTab:AddLeftGroupbox("World")
-    WorldSettings:AddCheckbox("World/NoFog", {
-        Text = "No Fog",
-        Tooltip = "Clears the haze so you can see across the map. Turning it off brings the game's fog back",
-    })
-    WorldSettings:AddCheckbox("World/Daytime", {
-        Text = "Daytime",
-        Tooltip = "Holds the clock at the time below. Turning it off gives the game its own time back",
-    })
-    WorldSettings:AddSlider("World/ClockTime", {
-        Text = "Time of Day",
-        Default = 14,
-        Min = 0,
-        Max = 24,
-        Rounding = 1,
-        Suffix = "h",
-    })
-
     local ShortcutSettings = SettingsTab:AddLeftGroupbox("Shortcuts")
     ShortcutSettings:AddLabel("Turn everything off"):AddKeyPicker("TurnEverythingOffKey", {
         Text = "Turn everything off",
@@ -14912,6 +17985,21 @@ end,
         end,
     })
     ShortcutSettings:AddLabel([[<font color="#707e96">every feature's own key sits beside its switch</font>]])
+
+    local SyncSettings = SettingsTab:AddRightGroupbox("Cosmetic Sync")
+    SyncSettings:AddCheckbox("Sync", {
+        Text = "Sync Cosmetics",
+        Default = true,
+        Tooltip = "Shares your cosmetics with other EclX users, and shows theirs",
+    })
+    local SyncOptions = SyncSettings:AddDependencyBox()
+    SyncOptions:SetupDependencies({ { Toggles.Sync, true } })
+    SyncOptions:AddCheckbox("Sync/ShowOthers", {
+        Text = "Show Others' Cosmetics",
+        Default = true,
+        Tooltip = "Off still sends yours, but shows everyone as your own settings would",
+    })
+    syncStatus = SyncOptions:AddLabel('<font color="#707e96">not connected yet</font>')
 
     for _, name in KEYBIND_TOGGLES do
         Toggles[name]:AddKeyPicker(string.format('Keybind/%s', tostring(name)), {
@@ -14950,38 +18038,44 @@ end,
     end
 
     do
-        local artygrav = dote.v().new()
-        local container = dote.o()
-        local beamcolor = dote.w().new()
-        local main = dote.x().new()
-        local spawnpoint = dote.y().new()
-        local bore = dote.z().new()
-        local pipeextender = dote.A().new()
-        local silentaim = dote.B().new()
-        local damageindicator = dote.C().new()
-        local visuals = dote.E().new()
-        local artillery = dote.F().new()
-        local autodcap = dote.G().new()
-        local autoshield = dote.H()
-        local heightlimit = dote.I().new()
-        local beaconspotesp = dote.J().new()
-        local boreaimbot = dote.K().new()
-        local borecustomize = dote.L().new()
-        local autoborepipe = dote.M().new()
-        local nofall = dote.N()
-        local lssilentaim = dote.P().new()
-        local orbitalvisuals = dote.Q().new()
-        local stoporbitalerror = dote.R().new()
-        local otherarty = dote.S().new()
-        local lsthreat = dote.T().new()
-        local placeanyway = dote.V().new()
-        local buildtools = dote.W().new()
-        local fastplacement = dote.X().new()
-        local gunmods = dote.Y().new()
-        local rocketaim = dote.Z().new()
-        local spawnesp = dote._().new()
-        local iridiumcolors = dote.ab().new()
-        local world = dote.ac().new()
+        local artygrav = dote.A().new()
+        local container = dote.t()
+        local beamcolor = dote.B().new()
+        local main = dote.C().new()
+        local spawnpoint = dote.D().new()
+        local bore = dote.E().new()
+        local pipeextender = dote.F().new()
+        local silentaim = dote.G().new()
+        local damageindicator = dote.H().new()
+        local visuals = dote.J().new()
+        local artillery = dote.K().new()
+        local autodcap = dote.L().new()
+        local autoshield = dote.M()
+        local heightlimit = dote.N().new()
+        local beaconspotesp = dote.O().new()
+        local boreaimbot = dote.P().new()
+        local borecustomize = dote.Q().new(sync)
+        local autoborepipe = dote.R().new()
+        local nofall = dote.S()
+        local lssilentaim = dote.U().new()
+        local orbitalvisuals = dote.V().new()
+        local stoporbitalerror = dote.W().new()
+        local otherarty = dote.X().new()
+        local lsthreat = dote.Y().new()
+        local placeanyway = dote._().new()
+        local buildtools = dote.aa().new()
+        local fastplacement = dote.ab().new()
+        local gunmods = dote.ac().new()
+        local rocketaim = dote.ad().new()
+        local spawnesp = dote.ae().new()
+        local iridiumcolors = dote.af().new()
+        local world = dote.ag().new()
+        local tracers = dote.ah().new(sync)
+        local avatar = dote.ai().new(sync)
+        local combat = Combat.new(tracker)
+        local killfeed = dote.aj().new(combat)
+        local hitfeedback = dote.ak().new(combat)
+        local skins = Skins.new(sync)
 
         for name, value in
             {
@@ -15033,6 +18127,21 @@ end,
         spawnesp:start()
         iridiumcolors:start()
         world:start()
+        tracers:start()
+        sync:start(function(text, isError)
+            local color = isError and"#ff5e6e" or"#707e96"
+            syncStatus:SetText(string.format('<font color="%s">%s</font>', tostring(color), tostring(text)))
+        end)
+        combat:start()
+        killfeed:start()
+        hitfeedback:start()
+        skins:start(Skins.gunNames())
+        announcerTestCall:Connect(function()
+            killfeed:test()
+        end)
+        avatar:start(function(message, kind)
+            window:Notify(message, 4, kind)
+        end)
 
         -- SetText rebuilds the rich text label, so only call it when the spawn changes
         local shownSpawn = {}
@@ -15051,6 +18160,8 @@ end,
             lsthreat:update()
             rocketaim:update()
             spawnesp:update()
+            tracers:update()
+            hitfeedback:update()
 
             if container.selectedSpawn ~= shownSpawn then
                 shownSpawn = container.selectedSpawn
