@@ -853,6 +853,7 @@ function Library:_buildSidebar()
         Parent = self.window,
     }, { corner(12) })
     theme.surface(sidebar, 1)
+    self.sidebar = sidebar
 
     -- square off the inner edge and draw the divider
     theme.surface(create("Frame", {
@@ -1410,6 +1411,75 @@ function Library:Unload()
         connection:Disconnect()
     end
     self.gui:Destroy()
+end
+
+-- a button under the tab list, above the player card, so it's one click away from any tab.
+-- returns an object with SetText to relabel it
+local SIDEBAR_BUTTON_HEIGHT = 30
+
+function Library:AddSidebarButton(info)
+    local actions = self.sidebarActions
+    if not actions then
+        actions = create("Frame", {
+            AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.new(0, 12, 1, -66),
+            Size = UDim2.new(1, -24, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1,
+            Parent = self.sidebar,
+        }, {
+            create("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
+        })
+        self.sidebarActions = actions
+        self.sidebarButtons = 0
+    end
+    self.sidebarButtons =self.sidebarButtons+ 1
+    -- the tab list gives up the room the buttons take
+    self.nav.Size = UDim2.new(1, 0, 1, -170 - self.sidebarButtons * (SIDEBAR_BUTTON_HEIGHT + 6))
+
+    local tint = colors[info.Color or "danger"]
+    local button = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, SIDEBAR_BUTTON_HEIGHT),
+        BackgroundColor3 = colors.field,
+        AutoButtonColor = false,
+        Text = info.Text,
+        Font = fonts.medium,
+        TextSize = 12,
+        TextColor3 = tint,
+        LayoutOrder = self.sidebarButtons,
+        Parent = actions,
+    }, { corner(6) })
+    theme.surface(button, 0.5)
+    local outline = stroke(colors.strokeBright)
+    outline.Parent = button
+
+    button.MouseEnter:Connect(function()
+        tween(outline, 0.1, { Color = tint })
+        tween(button, 0.1, { BackgroundColor3 = colors.raised })
+    end)
+    button.MouseLeave:Connect(function()
+        tween(outline, 0.1, { Color = colors.strokeBright })
+        tween(button, 0.1, { BackgroundColor3 = colors.field })
+    end)
+    button.MouseButton1Click:Connect(function()
+        if os.clock() - self.shownAt < CLICK_GRACE then
+            return
+        end
+        button.BackgroundColor3 = colors.hover
+        tween(button, 0.25, { BackgroundColor3 = colors.raised })
+        if info.Func then
+            task.spawn(safeCall, info.Func)
+        end
+    end)
+    self:_tooltipOn(button, info.Tooltip)
+
+    local object = {}
+    function object:SetText(newText, colorKey)
+        button.Text = newText
+        tint = colors[colorKey or info.Color or "danger"]
+        button.TextColor3 = tint
+    end
+    return object
 end
 
 -- tabs
@@ -7333,12 +7403,48 @@ return Tags
 end function dote.m()local v=dote.cache.m if not v then v={c=__modImpl()}dote.cache.m=v end return v.c end end do local __modImpl=function()
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
-local GetClosestPlayer=function(
-fovRadius, teamCheck)    
+
+-- wall check: a ray from origin to the part that only stops on something solid (CanCollide), passing
+-- through both characters, the camera and anything see-through to the game's own collisions
+local visibilityParams = RaycastParams.new()
+visibilityParams.FilterType = Enum.RaycastFilterType.Exclude
+visibilityParams.RespectCanCollide = true
+
+local VISIBILITY_PARTS = { "Head", "HumanoidRootPart" }
+local visiblePart=function(
+
+
+origin, character, preferred)    
+visibilityParams.FilterDescendantsInstances = { Players.LocalPlayer.Character, character, workspace.CurrentCamera }
+
+    local names = VISIBILITY_PARTS
+    if preferred and preferred ~= VISIBILITY_PARTS[1] then
+        names = { preferred, VISIBILITY_PARTS[1], VISIBILITY_PARTS[2] }
+    end
+
+    for _, name in names do
+        local part = character:FindFirstChild(name)
+        if part and part:IsA("BasePart") and not workspace:Raycast(origin, part.Position - origin, visibilityParams) then
+            return part
+        end
+    end
+    return nil
+end local shotOrigin=function()    
+
+
+
+local character = Players.LocalPlayer.Character
+    local head = character and character:FindFirstChild("Head")
+    return (head and{(head.Position )}or{(workspace.CurrentCamera.CFrame.Position
+)})[1]end local GetClosestPlayer=function(
+
+
+fovRadius, teamCheck, wallCheck)    
 local mousePos = UserInputService:GetMouseLocation()
     local fovSq = (fovRadius or 300) ^ 2
     local camera = workspace.CurrentCamera
     local LocalPlayer = Players.LocalPlayer
+    local origin = wallCheck and shotOrigin()
 
     local closestPlayer = nil
     local closestDistSq = fovSq
@@ -7375,7 +7481,8 @@ local mousePos = UserInputService:GetMouseLocation()
         local dx, dy = screenPos.X - mousePos.X, screenPos.Y - mousePos.Y
         local distSq = dx * dx + dy * dy
 
-        if distSq < closestDistSq then
+        -- the ray is the expensive part, so it only runs for a player that would win
+        if distSq < closestDistSq and not (origin and not visiblePart(origin, character)) then
             closestDistSq = distSq
             closestPlayer = player
         end
@@ -7562,6 +7669,8 @@ end
 
 return {
     claimHook = claimHook,
+    visiblePart = visiblePart,
+    shotOrigin = shotOrigin,
     GetClosestPlayer = GetClosestPlayer,
     circle = circle,
     label = label,
@@ -9151,6 +9260,13 @@ end
 function artygrav:start()
 	local Client = Players.LocalPlayer
 
+	-- turning it off while seated puts gravity back now instead of when you get off
+	Toggles.ArtyGravity:OnChanged(function(enabled)
+		if not enabled then
+			self:_restore()
+		end
+	end)
+
 	Client.CharacterAdded:Connect(function(character)
 		self:_hookCharacter(character)
 	end)
@@ -9713,17 +9829,23 @@ function main:start()
         local result = { oldMouseInfo(...) }
 
         if Toggles.SilentAim.Value then
-            local getCharacter =
-                utility.GetClosestPlayer(Options["SilentAim/DrawFovValue"].Value, Toggles["SilentAim/TeamCheck"].Value)
+            local wallCheck = Toggles["SilentAim/WallCheck"].Value
+            local getCharacter = utility.GetClosestPlayer(
+                Options["SilentAim/DrawFovValue"].Value,
+                Toggles["SilentAim/TeamCheck"].Value,
+                wallCheck
+            )
 
             container.lockedOn = getCharacter
             if getCharacter then
-                local bodyPart = getCharacter:FindFirstChild(
-(Options["SilentAim/BodyParts"].Value == "Random"
+                local partName = (Options["SilentAim/BodyParts"].Value == "Random"
 and{(getRandomBodyPart()
 )}or{(Options["SilentAim/BodyParts"].Value
-)})[1]                )
-
+)})[1]                -- the picked part behind cover while the other shows: shoot the one that shows
+                local bodyPart = (wallCheck
+and{(utility.visiblePart(utility.shotOrigin(), getCharacter, partName)
+)}or{(getCharacter:FindFirstChild(partName)
+)})[1]
                 if bodyPart then
                     local offset = Vector3.new(0, 0, 0)
                     local accuracy = Options["SilentAim/AccuracyValue"].Value
@@ -9935,6 +10057,9 @@ end
 -- ui settings, read once per frame in main:update and shared by every entity
 local frame = {}
 
+-- how often each player's wall check ray is cast
+local WALL_RECHECK = 0.1
+
 local main = {}
 main.__index = main
 
@@ -10024,6 +10149,7 @@ function main:addEsp(player, character)
     local root, hum
     local prevhealth
     local lastText, lastBoxColor, lastLabelColor, lastFillColor
+    local lastTextSize, lastFillTransparency, lastOutlineColor, lastOutlineTransparency
     local labelVisible = true -- utility.label starts visible
     local barVisible = false
     local boxVisible = false
@@ -10077,12 +10203,18 @@ setBoxVisible(false)
         setBarVisible(false)
         setLabelVisible(false)
         setOrbitalsVisible(false, false)
-end local pickColor=function(
-
+end
+    -- wall check: behind a wall from the camera (head and root both hidden), refreshed every WALL_RECHECK
+    
+local occluded, nextWallCheck = false, 0
+local pickColor=function(
 
 default)        
 if container.lockedOn == character then
             return frame.lockedColor
+        end
+        if occluded then
+            return frame.occludedColor
         end
 
         return (frame.useTeamColor and{(player.TeamColor.Color )}or{default
@@ -10116,6 +10248,22 @@ return {
                 return
             end
 
+            if frame.wallCheck then
+                local now = os.clock()
+                if now >= nextWallCheck then
+                    nextWallCheck = now + WALL_RECHECK
+                    occluded = utility.visiblePart(frame.camera.CFrame.Position, character) == nil
+                end
+            else
+                occluded = false
+            end
+
+            if occluded and frame.hideOccluded then
+                hide()
+                setHighlightEnabled(false)
+                return
+            end
+
             local dist = (rootPosition - localrootpart.Position).Magnitude
             local espLists = frame.lists
 
@@ -10126,6 +10274,13 @@ return {
 
             local root_x = root_pos.X
             local root_y = root_pos.Y
+
+            if frame.textSize ~= lastTextSize then
+                lastTextSize = frame.textSize
+                label.Size = frame.textSize
+                lsLabel.Size = frame.textSize
+                osLabel.Size = frame.textSize
+            end
 
             label.Position = Vector2.new(root_x, root_y - newsize_y - label.TextBounds.Y)
 
@@ -10233,6 +10388,18 @@ end
                     lastFillColor = fillColor
                     highlight.FillColor = fillColor
                 end
+                if frame.fillTransparency ~= lastFillTransparency then
+                    lastFillTransparency = frame.fillTransparency
+                    highlight.FillTransparency = frame.fillTransparency
+                end
+                if frame.outlineColor ~= lastOutlineColor then
+                    lastOutlineColor = frame.outlineColor
+                    highlight.OutlineColor = frame.outlineColor
+                end
+                if frame.outlineTransparency ~= lastOutlineTransparency then
+                    lastOutlineTransparency = frame.outlineTransparency
+                    highlight.OutlineTransparency = frame.outlineTransparency
+                end
 
                 setHighlightEnabled(true)
             else
@@ -10335,6 +10502,13 @@ and{localCharacter:FindFirstChild("HumanoidRootPart") or localCharacter.PrimaryP
     frame.labelColor = Options.LabelColor.Value
     frame.lsColor = Options.EspLsColor.Value
     frame.osColor = Options.EspOsColor.Value
+    frame.textSize = Options.EspTextSize.Value
+    frame.fillTransparency = Options.EspFillTransparency.Value
+    frame.outlineColor = Options.EspOutlineColor.Value
+    frame.outlineTransparency = Options.EspOutlineTransparency.Value
+    frame.wallCheck = Toggles.playersVisualWallCheck.Value
+    frame.hideOccluded = Toggles.playersVisualHideOccluded.Value
+    frame.occludedColor = Options.EspOccludedColor.Value
 
     local teamCheck = Toggles.playersVisualTeamcheck.Value
 
@@ -13276,7 +13450,750 @@ function main:update()
 end
 
 return main
-end function dote.Z()local v=dote.cache.Z if not v then v={c=__modImpl()}dote.cache.Z=v end return v.c end end end-- EclX client for Eclipsis
+end function dote.Z()local v=dote.cache.Z if not v then v={c=__modImpl()}dote.cache.Z=v end return v.c end end do local __modImpl=function()-- spawn esp, loosely after the scanner's spawn markers: a small diamond over each spawn in its team's
+-- color with the spawn number beside it. only spawns with enough iridium to teleport to (140) are shown;
+-- a filled diamond also has enough to spawn on (280), a hollow one is teleport only.
+-- kept out of the way on purpose:
+--   * markers are small and see-through until the cursor comes near them
+--   * markers that overlap on screen fold into the nearest one, which shows "+N"; pointing at the
+--     group spreads it back out
+--   * only the marker closest to the cursor shows details (team, distance, spawn / teleport)
+--   * spawns you're standing at aren't drawn
+-- your team's pads come from the spawn menu's own list (it knows the pads even when they're streamed
+-- out); other teams' come from the structures, which carry the same levels as attributes
+
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Teams = game:GetService("Teams")
+local UserInputService = game:GetService("UserInputService")
+
+local container = dote.o()
+
+local SpawnPointController =
+    require(ReplicatedStorage:WaitForChild("Client"):WaitForChild("Loader"):WaitForChild("SpawnPointController"))
+
+-- sizes, distances and colors are all options (Visuals > Spawn ESP):
+--   SpawnESP/Height       studs the markers float above the pad
+--   SpawnESP/MarkerSize   half the diamond's width in pixels; the selected spawn's is SELECTED_GROWTH bigger
+--   SpawnESP/GroupRadius  markers closer than this on screen fold into one
+--   SpawnESP/FocusRadius  markers this close to the cursor stand on their own at full opacity
+--   SpawnESP/HideWithin   spawns nearer than this to the camera aren't drawn
+local REFRESH_INTERVAL = 0.25
+local SELECTED_GROWTH = 2
+
+local OUTLINE_COLOR = Color3.new(0, 0, 0)
+
+local LocalPlayer = Players.LocalPlayer
+
+local main = {}
+main.__index = main
+
+function main.new()
+    return setmetatable({
+        structures = {}, -- spawn point models in workspace.Structures
+        pads = {}, -- what's drawn, rebuilt every REFRESH_INTERVAL
+        markers = {}, -- pooled drawings
+        nextRefresh = 0,
+        shown = 0,
+    }, main)
+end
+local teamName=function(
+brickColor)    
+for _, team in Teams:GetTeams() do
+        if team.TeamColor == brickColor then
+            return team.Name
+        end
+    end
+    return brickColor.Name
+end
+
+function main:start()
+    local structures = self.structures
+    local folder = workspace:WaitForChild("Structures")
+local track=function(
+child)        
+if child.Name == "Spawn Point" then
+            structures[child] = true
+        end
+end    
+for _, child in folder:GetChildren() do
+        track(child)
+    end
+    folder.ChildAdded:Connect(track)
+    folder.ChildRemoved:Connect(function(child)
+        structures[child] = nil
+    end)
+end
+
+-- the spawns worth drawing right now
+function main:_refresh()
+    local pads = {}
+    local teams = Options["SpawnESP/Teams"].Value
+    local myTeam = LocalPlayer.TeamColor
+    local lift = Vector3.new(0, Options["SpawnESP/Height"].Value, 0)
+
+    if teams["My Team"] then
+        local color = myTeam.Color
+        for _, pad in SpawnPointController.padList do
+            if (pad.TeleportAvailabilityLevel or 0) >= 1 and pad.Location then
+                table.insert(pads, {
+                    position = pad.Location.Position + lift,
+                    number = pad.Index,
+                    color = color,
+                    canSpawn = (pad.AvailabilityLevel or 0) >= 1,
+                    mine = true,
+                })
+            end
+        end
+    end
+
+    if teams["Enemy Teams"] then
+        for model in self.structures do
+            local team = model:GetAttribute("Team")
+            if typeof(team) ~= "BrickColor" or team == myTeam then
+                continue
+            end
+            if (model:GetAttribute("CanTeleport") or 0) < 1 then
+                continue
+            end
+            table.insert(pads, {
+                position = model:GetPivot().Position + lift,
+                number = model:GetAttribute("SpawnPadIndex"),
+                color = team.Color,
+                canSpawn = (model:GetAttribute("CanSpawn") or 0) >= 1,
+                team = teamName(team),
+            })
+        end
+    end
+
+    self.pads = pads
+end
+
+-- the n-th pooled marker: an outline diamond under a colored one, and a label
+function main:_marker(index)
+    local marker = self.markers[index]
+    if marker then
+        return marker
+    end
+
+    local outline = Drawing.new("Quad")
+    outline.Color = OUTLINE_COLOR
+    outline.Filled = false
+    outline.ZIndex = 1
+
+    local diamond = Drawing.new("Quad")
+    diamond.ZIndex = 2
+
+    local label = Drawing.new("Text")
+    label.Font = Drawing.Fonts.Monospace
+    label.Outline = true
+    label.OutlineColor = OUTLINE_COLOR
+    label.ZIndex = 3
+
+    marker = { outline = outline, diamond = diamond, label = label }
+    self.markers[index] = marker
+    return marker
+end
+local setVisible=function(
+marker, visible)    
+if marker.visible ~= visible then
+        marker.visible = visible
+        marker.outline.Visible = visible
+        marker.diamond.Visible = visible
+        marker.label.Visible = visible
+    end
+end
+-- hides the markers from `first` on
+
+function main:_hideFrom(first)
+    for index = first, self.shown do
+        setVisible(self.markers[index], false)
+    end
+    self.shown = first - 1
+end
+
+-- options read once per frame in main:update
+local style = {}
+local draw=function(
+marker, item, size, opacity, text)    
+local x, y = item.x, item.y
+    local top, right = Vector2.new(x, y - size), Vector2.new(x + size, y)
+    local bottom, left = Vector2.new(x, y + size), Vector2.new(x - size, y)
+    local pad = item.pad
+
+    local outline, diamond, label = marker.outline, marker.diamond, marker.label
+    outline.PointA, outline.PointB, outline.PointC, outline.PointD = top, right, bottom, left
+    diamond.PointA, diamond.PointB, diamond.PointC, diamond.PointD = top, right, bottom, left
+
+    -- filled: can spawn there. hollow: teleport only
+    if marker.filled ~= pad.canSpawn then
+        marker.filled = pad.canSpawn
+        diamond.Filled = pad.canSpawn
+        diamond.Thickness = pad.canSpawn and 1 or 2
+        outline.Thickness = pad.canSpawn and 2 or 4
+    end
+    local color = pad.color
+    if style.customColors then
+        color = (pad.mine and{(style.myColor )}or{(style.enemyColor
+)})[1]    end
+    if marker.color ~= color then
+        marker.color = color
+        diamond.Color = color
+    end
+    if marker.textSize ~= style.textSize then
+        marker.textSize = style.textSize
+        label.Size = style.textSize
+    end
+    if marker.labelColor ~= style.labelColor then
+        marker.labelColor = style.labelColor
+        label.Color = style.labelColor
+    end
+    if marker.opacity ~= opacity then
+        marker.opacity = opacity
+        outline.Transparency = opacity * 0.8
+        diamond.Transparency = opacity
+        label.Transparency = opacity
+    end
+    if marker.text ~= text then
+        marker.text = text
+        label.Text = text
+    end
+    label.Position = Vector2.new(x + size + 4, y - label.TextBounds.Y / 2)
+
+    setVisible(marker, true)
+end
+
+function main:update()
+    if not Toggles.SpawnESP.Value then
+        if self.shown > 0 then
+            self:_hideFrom(1)
+        end
+        return
+    end
+
+    local now = os.clock()
+    if now >= self.nextRefresh then
+        self.nextRefresh = now + REFRESH_INTERVAL
+        self:_refresh()
+    end
+
+    style.customColors = Toggles["SpawnESP/CustomColors"].Value
+    style.myColor = Options["SpawnESP/MyColor"].Value
+    style.enemyColor = Options["SpawnESP/EnemyColor"].Value
+    style.textSize = Options["SpawnESP/TextSize"].Value
+    style.labelColor = Options["SpawnESP/LabelColor"].Value
+    local markerSize = Options["SpawnESP/MarkerSize"].Value
+    local groupRadius = Options["SpawnESP/GroupRadius"].Value
+    local focusRadius = Options["SpawnESP/FocusRadius"].Value
+    local hideWithin = Options["SpawnESP/HideWithin"].Value
+
+    local camera = workspace.CurrentCamera
+    local cameraPosition = camera.CFrame.Position
+    local mouse = UserInputService:GetMouseLocation()
+
+    -- on screen, nearest first so the nearest spawn leads its group
+    local items = {}
+    for _, pad in self.pads do
+        local distance = (pad.position - cameraPosition).Magnitude
+        if distance < hideWithin then
+            continue
+        end
+        local point, onScreen = camera:WorldToViewportPoint(pad.position)
+        if not onScreen then
+            continue
+        end
+        local x, y = point.X, point.Y
+        table.insert(items, {
+            pad = pad,
+            x = x,
+            y = y,
+            distance = distance,
+            cursor = math.sqrt((x - mouse.X) ^ 2 + (y - mouse.Y) ^ 2),
+            extra = 0,
+        })
+    end
+    table.sort(items, function(a, b)
+        return a.distance < b.distance
+    end)
+
+    -- the one the cursor is on gets the details
+    local focus
+    for _, item in items do
+        if item.cursor < focusRadius and (not focus or item.cursor < focus.cursor) then
+            focus = item
+        end
+    end
+
+    local grouping = Toggles["SpawnESP/Group"].Value
+    local leaders = {}
+    for _, item in items do
+        local leader
+        if grouping and item.cursor >= focusRadius then
+            for _, other in leaders do
+                if
+                    other.cursor >= focusRadius
+                    and (other.x - item.x) ^ 2 + (other.y - item.y) ^ 2 < groupRadius * groupRadius
+                then
+                    leader = other
+                    break
+                end
+            end
+        end
+
+        if leader then
+            leader.extra =leader.extra+ 1
+        else
+            table.insert(leaders, item)
+        end
+    end
+
+    local idleOpacity = Options["SpawnESP/Opacity"].Value
+    local selected = container.selectedSpawn
+
+    for index, item in leaders do
+        local pad = item.pad
+        local text
+        if item == focus then
+            text = string.format('S%s - %sm - %s', tostring(pad.number), tostring(math.round(item.distance)), tostring(pad.canSpawn and"spawn" or"tp only"))            
+if pad.team then
+                text = string.format('%s %s', tostring(pad.team), tostring(text))            
+end
+        else
+            text = (item.extra > 0 and{(string.format('%s +%s', tostring(pad.number), tostring(item.extra)))}or{(tostring(pad.number)
+)})[1]        end
+
+        local isSelected = pad.mine and selected ~= nil and tostring(selected) == tostring(pad.number)
+        local opacity = item.cursor < focusRadius and 1 or idleOpacity
+        draw(self:_marker(index), item, (isSelected and{(markerSize + SELECTED_GROWTH )}or{markerSize})[1], opacity, text)
+    end
+
+    if #leaders > self.shown then
+        self.shown = #leaders
+    else
+        self:_hideFrom(#leaders + 1)
+    end
+end
+
+return main
+end function dote._()local v=dote.cache._ if not v then v={c=__modImpl()}dote.cache._=v end return v.c end end do local __modImpl=function()-- holds instance properties at our own values and puts the game's back when let go.
+-- if the game changes a held property (a map's lighting loading in, a structure recoloring itself), its
+-- new value is what gets restored later and ours goes straight back on, so nothing flickers.
+-- usage: local held = override.new(); held:set(Lighting, "ClockTime", 14); held:release(Lighting, "ClockTime")
+
+
+local override = {}
+override.__index = override
+
+function override.new()
+    return setmetatable({
+        entries = {}, -- instance -> { props = { property -> prop }, ancestry = connection }
+    }, override)
+end
+local write=function(
+
+instance, property, prop)    
+prop.writing = true
+    instance[property] = prop.value
+    prop.writing = false
+    prop.applied = instance[property]
+end
+-- drops an instance without writing to it, for when it has left the game
+
+function override:_forget(instance)
+    local entry = self.entries[instance]
+    if not entry then
+        return
+    end
+    self.entries[instance] = nil
+    entry.ancestry:Disconnect()
+    for _, prop in entry.props do
+        prop.connection:Disconnect()
+    end
+end
+
+function override:set(instance, property, value)
+    local entry = self.entries[instance]
+    if not entry then
+        entry = { props = {} }
+        -- streamed out or destroyed: nothing left to restore
+        entry.ancestry = instance.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then
+                self:_forget(instance)
+            end
+        end)
+        self.entries[instance] = entry
+    end
+
+    local prop = entry.props[property]
+    if not prop then
+        prop = { original = instance[property] }
+        prop.connection = instance:GetPropertyChangedSignal(property):Connect(function()
+            -- our own write: with immediate signals it lands here mid-write, with deferred ones later,
+            -- compared with what the property read back as (the engine stores some values at lower
+            -- precision than the number we gave it)
+            local current = instance[property]
+            if prop.writing or current == prop.applied then
+                return
+            end
+            prop.original = current
+            write(instance, property, prop)
+        end)
+        entry.props[property] = prop
+    end
+
+    prop.value = value
+    write(instance, property, prop)
+end
+
+-- puts the game's value back
+function override:release(instance, property)
+    local entry = self.entries[instance]
+    local prop = entry and entry.props[property]
+    if not prop then
+        return
+    end
+
+    prop.connection:Disconnect()
+    entry.props[property] = nil
+    instance[property] = prop.original
+
+    if next(entry.props) == nil then
+        entry.ancestry:Disconnect()
+        self.entries[instance] = nil
+    end
+end
+
+-- the game's value: what release would put back, or the current value if it isn't held
+function override:original(instance, property)
+    local entry = self.entries[instance]
+    local prop = entry and entry.props[property]
+    if prop then
+        return prop.original
+    end
+    return instance[property]
+end
+
+function override:isHeld(instance, property)
+    local entry = self.entries[instance]
+    return entry ~= nil and entry.props[property] ~= nil
+end
+
+function override:releaseAll()
+    for instance, entry in self.entries do
+        for property in entry.props do
+            self:release(instance, property)
+        end
+    end
+end
+
+return override
+end function dote.aa()local v=dote.cache.aa if not v then v={c=__modImpl()}dote.cache.aa=v end return v.c end end do local __modImpl=function()-- recolors iridium: the glowing meter in every tank (structures and the one on each player's back) and
+-- the crystals on the map, along with the light each one gives off. a crystal's body is drawn darker
+-- than its glow (the game's is about 60% as bright: cyan glow, teal body), by the Crystal Body Shade
+-- slider. Glow Brightness scales the game's own light brightness. nothing is watched while both are
+-- off, and turning one off puts the game's colors and lights back
+
+
+local override = dote.aa()
+local shaded=function(
+color, shade)    
+if shade == 1 then
+        return color
+    end
+    return Color3.new(color.R * shade, color.G * shade, color.B * shade)
+end local tankShade=function(
+
+
+instance)    
+if instance.Name == "IridiumMeter" and instance:IsA("BasePart") then
+        return 1
+    end
+    local parent = instance.Parent
+    if parent and parent.Name == "IridiumMeter" and instance:IsA("Light") then
+        return 1
+    end
+    return nil
+end local crystalShade=function(
+
+instance)    
+local parent = instance.Parent
+    if not parent then
+        return nil
+    end
+    if instance.Name == "Mesh" and parent.Name == "IridiumCrystal" and instance:IsA("BasePart") then
+        return Options["IridiumColors/CrystalShade"].Value
+    end
+    if instance:IsA("Light") and parent.Name == "Mesh" and parent.Parent and parent.Parent.Name == "IridiumCrystal" then
+        return 1
+    end
+    return nil
+end
+
+local main = {}
+main.__index = main
+
+function main.new()
+    return setmetatable({}, main)
+end
+local group=function(
+
+toggleName, colorName, getRoot, shadeOf)    
+local held = override.new()
+    local added
+local paint=function(
+instance)        
+local shade = shadeOf(instance)
+        if not shade then
+            return
+        end
+        held:set(instance, "Color", shaded(Options[colorName].Value, shade))
+
+        if instance:IsA("Light") then
+            local glow = Options["IridiumColors/GlowBrightness"].Value
+            if glow == 1 then
+                held:release(instance, "Brightness")
+            else
+                held:set(instance, "Brightness", held:original(instance, "Brightness") * glow)
+            end
+        end
+end local refresh=function()        
+
+
+if not Toggles[toggleName].Value then
+            if added then
+                added:Disconnect()
+                added = nil
+            end
+            held:releaseAll()
+            return
+        end
+
+        local root = getRoot()
+        if not root then
+            return
+        end
+        if not added then
+            added = root.DescendantAdded:Connect(paint)
+            for _, descendant in root:GetDescendants() do
+                paint(descendant)
+            end
+        else
+            for instance in held.entries do
+                paint(instance)
+            end
+        end
+end local repaint=function()        
+
+
+if Toggles[toggleName].Value then
+            refresh()
+        end
+end
+    
+Toggles[toggleName]:OnChanged(refresh)
+    Options[colorName]:OnChanged(repaint)
+    Options["IridiumColors/GlowBrightness"]:OnChanged(repaint)
+    Options["IridiumColors/CrystalShade"]:OnChanged(repaint)
+    refresh()
+end
+
+function main:start()
+    -- meters sit in structures and on characters, so tanks watch all of workspace (only a name check
+    -- per new instance, and only while it's on)
+    group("IridiumColors/Tanks", "IridiumColors/TankColor", function()
+        return workspace
+    end, tankShade)
+
+    group("IridiumColors/Crystals", "IridiumColors/CrystalColor", function()
+        return workspace:FindFirstChild("Resources")
+    end, crystalShade)
+end
+
+return main
+end function dote.ab()local v=dote.cache.ab if not v then v={c=__modImpl()}dote.cache.ab=v end return v.c end end do local __modImpl=function()-- no fog, daytime and the lighting options in Colors. the game's fog is an Atmosphere in Lighting (plus
+-- the classic fog range), and its night is just the clock. Lighting properties are held through override,
+-- so turning an option off puts the game's own values back, including any the game set while it was on.
+-- color correction and bloom are our own effects on the camera, layered over the game's, so the game's
+-- effects keep working underneath and turning ours off just removes them
+
+
+local Lighting = game:GetService("Lighting")
+
+local override = dote.aa()
+
+local NO_FOG_RANGE = 1e6
+
+local world = {}
+world.__index = world
+
+function world.new()
+    return setmetatable({
+        held = override.new(),
+    }, world)
+end
+
+function world:_applyFog()
+    local held = self.held
+    local on = Toggles["World/NoFog"].Value
+
+    for _, property in { "FogStart", "FogEnd" } do
+        if on then
+            held:set(Lighting, property, NO_FOG_RANGE)
+        else
+            held:release(Lighting, property)
+        end
+    end
+
+    for _, child in Lighting:GetChildren() do
+        if child:IsA("Atmosphere") then
+            if on then
+                held:set(child, "Density", 0)
+            else
+                held:release(child, "Density")
+            end
+        end
+    end
+end
+
+-- ambient, brightness, exposure
+function world:_applyLighting()
+    local held = self.held
+    if Toggles["Lighting/Custom"].Value then
+        held:set(Lighting, "Ambient", Options["Lighting/Ambient"].Value)
+        held:set(Lighting, "OutdoorAmbient", Options["Lighting/OutdoorAmbient"].Value)
+        held:set(Lighting, "Brightness", Options["Lighting/Brightness"].Value)
+        held:set(Lighting, "ExposureCompensation", Options["Lighting/Exposure"].Value)
+    else
+        for _, property in { "Ambient", "OutdoorAmbient", "Brightness", "ExposureCompensation" } do
+            held:release(Lighting, property)
+        end
+    end
+end
+
+-- the color and decay of the haze; only shows where there's fog to tint
+function world:_applySkyTint(atmosphere)
+    local held = self.held
+    if Toggles["Lighting/SkyTint"].Value then
+        held:set(atmosphere, "Color", Options["Lighting/HazeColor"].Value)
+        held:set(atmosphere, "Decay", Options["Lighting/DecayColor"].Value)
+    else
+        held:release(atmosphere, "Color")
+        held:release(atmosphere, "Decay")
+    end
+end
+
+-- creates, updates or removes one of our post effects. settings: property -> option name
+function world:_applyEffect(name, className, toggleName, settings)
+    local effect = self[name]
+    if not Toggles[toggleName].Value then
+        if effect then
+            effect:Destroy()
+            self[name] = nil
+        end
+        return
+    end
+
+    if not effect then
+        effect = Instance.new(className)
+        self[name] = effect
+    end
+    for property, optionName in settings do
+        effect[property] = Options[optionName].Value
+    end
+    effect.Parent = workspace.CurrentCamera
+end
+
+local COLOR_CORRECTION = {
+    TintColor = "Lighting/Tint",
+    Brightness = "Lighting/CCBrightness",
+    Contrast = "Lighting/Contrast",
+    Saturation = "Lighting/Saturation",
+}
+local BLOOM = {
+    Intensity = "Lighting/BloomIntensity",
+    Size = "Lighting/BloomSize",
+    Threshold = "Lighting/BloomThreshold",
+}
+
+function world:_applyEffects()
+    self:_applyEffect("colorCorrection", "ColorCorrectionEffect", "Lighting/ColorCorrection", COLOR_CORRECTION)
+    self:_applyEffect("bloom", "BloomEffect", "Lighting/Bloom", BLOOM)
+end
+
+function world:_applyTime()
+    if Toggles["World/Daytime"].Value then
+        self.held:set(Lighting, "ClockTime", Options["World/ClockTime"].Value)
+    else
+        self.held:release(Lighting, "ClockTime")
+    end
+end
+
+function world:start()
+    Toggles["World/NoFog"]:OnChanged(function()
+        self:_applyFog()
+    end)
+    Toggles["World/Daytime"]:OnChanged(function()
+        self:_applyTime()
+    end)
+    Options["World/ClockTime"]:OnChanged(function()
+        if Toggles["World/Daytime"].Value then
+            self:_applyTime()
+        end
+    end)
+local listen=function(
+
+names, apply)        
+for _, name in names do
+            local object = Toggles[name] or Options[name]
+            object:OnChanged(apply)
+        end
+end    
+listen({ "Lighting/Custom", "Lighting/Ambient", "Lighting/OutdoorAmbient", "Lighting/Brightness", "Lighting/Exposure" }, function()
+        self:_applyLighting()
+    end)
+    listen({ "Lighting/SkyTint", "Lighting/HazeColor", "Lighting/DecayColor" }, function()
+        for _, child in Lighting:GetChildren() do
+            if child:IsA("Atmosphere") then
+                self:_applySkyTint(child)
+            end
+        end
+    end)
+    local effectOptions = { "Lighting/ColorCorrection", "Lighting/Bloom" }
+    for _, settings in { COLOR_CORRECTION, BLOOM } do
+        for _, optionName in settings do
+            table.insert(effectOptions, optionName)
+        end
+    end
+    listen(effectOptions, function()
+        self:_applyEffects()
+    end)
+    -- a new camera would leave our effects behind
+    workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+        self:_applyEffects()
+    end)
+
+    -- a map can bring its own atmosphere
+    Lighting.ChildAdded:Connect(function(child)
+        if not child:IsA("Atmosphere") then
+            return
+        end
+        if Toggles["World/NoFog"].Value then
+            self.held:set(child, "Density", 0)
+        end
+        if Toggles["Lighting/SkyTint"].Value then
+            self:_applySkyTint(child)
+        end
+    end)
+
+    self:_applyFog()
+    self:_applyTime()
+    self:_applyLighting()
+    self:_applyEffects()
+end
+
+return world
+end function dote.ac()local v=dote.cache.ac if not v then v={c=__modImpl()}dote.cache.ac=v end return v.c end end end-- EclX client for Eclipsis
 
 
 loadstring([[
@@ -13297,6 +14214,51 @@ local StatsBoard = dote.h()
 local scoreWeights = dote.i()
 
 local QUICK_BUILD_SLOTS = 6
+
+-- features that get a key slot beside their switch (Toggle mode; right click the chip for Hold / Press).
+-- silent aim, ls silent aim and spawn esp have their own already; sub-options like Teamcheck don't get one
+local KEYBIND_TOGGLES = {
+    "JetPackMods",
+    "FallDamage",
+    "InstantProduceWeapons",
+    "AutoInteractBore",
+    "ArtyGravity",
+    "StopOrbitalError",
+    "GunMods/NoSprintCheck",
+    "GunMods/NoIridium",
+    "RocketSilentAim",
+    "BoreAimbot",
+    "PORTAFAB/InfiniteRange",
+    "PORTAFAB/PlaceAnyway",
+    "PORTAFAB/KeepPlacing",
+    "PORTAFAB/ExtendPipeHitbox",
+    "QuickBuild",
+    "AutoDCap",
+    "AutoShield",
+    "AutoBorePipe",
+    "artyVisual",
+    "OtherArtyVisual",
+    "playersVisual",
+    "DamageIndicator",
+    "HeightLimitESP",
+    "BeaconSpotESP",
+    "OsVisualizer",
+    "LsVisualizer",
+    "LsThreatRings",
+    "IridiumColors/Tanks",
+    "IridiumColors/Crystals",
+    "ChangeBeamColors",
+    "NeonBores",
+    "BoreBeamColorChange",
+    "PreviewBeamColorChange",
+    "BoreFlareColors",
+    "Lighting/Custom",
+    "Lighting/ColorCorrection",
+    "Lighting/Bloom",
+    "Lighting/SkyTint",
+    "World/NoFog",
+    "World/Daytime",
+}
 
 local env = (getgenv and{(getgenv() )}or{_G
 })[1]
@@ -13322,6 +14284,8 @@ if env.EclX then
     return
 end
 
+local turnOffCall = signal.new()
+
 local window = Library.new({
     globals = true,
     -- spawn pads change every game, so the picked one isn't saved
@@ -13334,6 +14298,7 @@ local CombatTab = window:AddTab("Combat")
 local BuildTab = window:AddTab("Build")
 local AutoTab = window:AddTab("Autos")
 local VisualTab = window:AddTab("Visuals")
+local ColorTab = window:AddTab("Colors")
 local MatchTab = window:AddTab("Match")
 
 do
@@ -13438,6 +14403,10 @@ end,
         { Text = "Select BodyPart", Default = "Head", Values = { "Head", "Random", "HumanoidRootPart" }, Multi = false }
     )
     SilentAimSection:AddCheckbox("SilentAim/TeamCheck", { Text = "Teamcheck" })
+    SilentAimSection:AddCheckbox("SilentAim/WallCheck", {
+        Text = "Wallcheck",
+        Tooltip = "Only locks on to players you could hit from your head: their head or torso has to be in the open. Aims at whichever of the two is",
+    })
     SilentAimSection:AddCheckbox("SilentAim/DrawFov", { Text = "Draw FOV" }):AddColorPicker("SilentAim/DrawFovColor", {
         Default = Color3.fromRGB(255, 255, 255),
         Title = "Draw FOV Color",
@@ -13655,6 +14624,32 @@ end,
         :AddColorPicker("BoxColor", { Title = "Box Color", Default = Color3.fromRGB(119, 255, 28) })
     PlayerVisualSection:AddCheckbox("playersVisualUseTeamColor", { Text = "Use Team Color" })
     PlayerVisualSection:AddCheckbox("playersVisualTeamcheck", { Text = "Teamcheck" })
+    PlayerVisualSection:AddCheckbox("playersVisualWallCheck", {
+        Text = "Wallcheck",
+        Tooltip = "Players behind walls (head and torso both hidden from your camera) are drawn in this color",
+    }):AddColorPicker("EspOccludedColor", { Title = "Behind Wall Color", Default = Color3.fromRGB(140, 140, 160) })
+    PlayerVisualSection:AddCheckbox("playersVisualHideOccluded", {
+        Text = "Hide Players Behind Walls",
+        Tooltip = "With wallcheck on, only players you can see get an ESP",
+    })
+    PlayerVisualSection:AddDivider()
+    PlayerVisualSection:AddSlider("EspTextSize", { Text = "Text Size", Default = 18, Min = 8, Max = 32, Rounding = 0, Suffix = "px" })
+    PlayerVisualSection:AddSlider("EspFillTransparency", {
+        Text = "Highlight Fill Transparency",
+        Default = 0.4,
+        Min = 0,
+        Max = 1,
+        Rounding = 2,
+    })
+    PlayerVisualSection:AddLabel("Highlight Outline Color")
+        :AddColorPicker("EspOutlineColor", { Title = "Highlight Outline Color", Default = Color3.fromRGB(255, 255, 255) })
+    PlayerVisualSection:AddSlider("EspOutlineTransparency", {
+        Text = "Highlight Outline Transparency",
+        Default = 0,
+        Min = 0,
+        Max = 1,
+        Rounding = 2,
+    })
 
     local UtilityVisualSection = VisualTab:AddLeftGroupbox("Utilities")
     UtilityVisualSection:AddCheckbox("DamageIndicator", { Text = "Damage Indicator" })
@@ -13676,46 +14671,81 @@ end,
             "BeaconSpotColor",
             { Title = "Beacon ESP Color", Default = Color3.fromRGB(255, 102, 0) }
         )
-    UtilityVisualSection:AddDivider()
-    local beamColorToggle = UtilityVisualSection:AddCheckbox("ChangeBeamColors", {Text = "Change Distributor Beam Color"})
-    beamColorToggle:AddColorPicker(
-        "FirstBeamColor",
-        { Title = "BeamColorOne", Default = Color3.fromRGB(0, 255, 255) }
-    )
-    beamColorToggle:AddColorPicker(
-        "SecondBeamColor",
-        { Title = "BeamColortwo", Default = Color3.fromRGB(0, 255, 255) }
-    )
 
-    local BoreVisualsSection = VisualTab:AddRightGroupbox("Bore Visuals")
-    BoreVisualsSection:AddCheckbox("NeonBores",{Text = "Neon Bores"})
-    local boreBeamToggle = BoreVisualsSection:AddCheckbox("BoreBeamColorChange", {
-        Text = "Change Bore Beam Color",
-        Tooltip = "Recolors the beam on bores you placed; it still charges from the first color to the second",
+    local SpawnEspSection = VisualTab:AddLeftGroupbox("Spawn ESP")
+    SpawnEspSection:AddCheckbox("SpawnESP", {
+        Text = "Spawn ESP",
+        Tooltip = "Marks spawns with enough iridium to teleport to, in their team's color. Filled: can spawn there too. Hollow: teleport only",
+    }):AddKeyPicker("SpawnESPKey", {
+        Text = "Spawn ESP",
+        Mode = "Toggle",
+        SyncToggleState = true,
     })
-    boreBeamToggle:AddColorPicker("BoreBeamColor", {Title = "Bore Beam Color (Uncharged)", Default = Color3.fromRGB(0, 255, 255)})
-    boreBeamToggle:AddColorPicker("BoreBeamColorCharged", {Title = "Bore Beam Color (Charged)", Default = Color3.fromRGB(0, 0, 255)})
-    local previewBeamToggle = BoreVisualsSection:AddCheckbox("PreviewBeamColorChange",{Text = "Preview Beam Color Change"})
-    previewBeamToggle:AddColorPicker(
-        "PreviewBeamColorOne",
-        { Title = "Previewbeamcolorone", Default = Color3.fromRGB(0, 255, 255)}
-    )
-    previewBeamToggle:AddColorPicker(
-        "PreviewBeamColorTwo",
-        { Title = "Previewbeamcolortwo", Default = Color3.fromRGB(0, 255, 255)}
-    )
-    local boreFlareToggle = BoreVisualsSection:AddCheckbox("BoreFlareColors", {
-        Text = "Bore Flare Colors",
-        Tooltip = "Recolors the flare particles and light on bores you placed; the light uses the first color",
+    SpawnEspSection:AddDropdown("SpawnESP/Teams", {
+        Text = "Show Spawns Of",
+        Default = { "My Team", "Enemy Teams" },
+        Values = { "My Team", "Enemy Teams" },
+        Multi = true,
     })
-    boreFlareToggle:AddColorPicker(
-        "BoreFlareColorOne",
-        { Title = "Bore Flare Color (Start)", Default = Color3.fromRGB(0, 0, 255)}
-    )
-    boreFlareToggle:AddColorPicker(
-        "BoreFlareColorTwo",
-        { Title = "Bore Flare Color (End)", Default = Color3.fromRGB(0, 255, 255)}
-    )
+    SpawnEspSection:AddSlider("SpawnESP/Opacity", {
+        Text = "Idle Opacity",
+        Default = 0.5,
+        Min = 0.1,
+        Max = 1,
+        Rounding = 2,
+        Tooltip = "How visible markers are until your cursor comes near them",
+    })
+    SpawnEspSection:AddCheckbox("SpawnESP/Group", {
+        Text = "Group Overlapping Markers",
+        Default = true,
+        Tooltip = "Markers on top of each other fold into one with a +N count. Point at the group to spread it out",
+    })
+    SpawnEspSection:AddDivider()
+    SpawnEspSection:AddSlider("SpawnESP/MarkerSize", { Text = "Marker Size", Default = 4.5, Min = 2, Max = 14, Rounding = 1, Suffix = "px" })
+    SpawnEspSection:AddSlider("SpawnESP/TextSize", { Text = "Number Size", Default = 13, Min = 8, Max = 26, Rounding = 0, Suffix = "px" })
+    SpawnEspSection:AddSlider("SpawnESP/Height", {
+        Text = "Height Above Pad",
+        Default = 3.5,
+        Min = 0,
+        Max = 20,
+        Rounding = 1,
+        Suffix = " studs",
+    })
+    SpawnEspSection:AddSlider("SpawnESP/GroupRadius", {
+        Text = "Group Distance",
+        Default = 20,
+        Min = 4,
+        Max = 100,
+        Rounding = 0,
+        Suffix = "px",
+        Tooltip = "How close markers have to be on screen to fold into one",
+    })
+    SpawnEspSection:AddSlider("SpawnESP/FocusRadius", {
+        Text = "Cursor Reveal Distance",
+        Default = 60,
+        Min = 10,
+        Max = 300,
+        Rounding = 0,
+        Suffix = "px",
+        Tooltip = "Markers this close to your cursor brighten, spread out of their group, and the nearest one shows its details",
+    })
+    SpawnEspSection:AddSlider("SpawnESP/HideWithin", {
+        Text = "Hide Spawns Within",
+        Default = 20,
+        Min = 0,
+        Max = 150,
+        Rounding = 0,
+        Suffix = " studs",
+        Tooltip = "Spawns this close to your camera aren't marked, since you can already see them",
+    })
+    SpawnEspSection:AddLabel("Number Color")
+        :AddColorPicker("SpawnESP/LabelColor", { Title = "Spawn Number Color", Default = Color3.fromRGB(235, 240, 248) })
+    SpawnEspSection:AddCheckbox("SpawnESP/CustomColors", {
+        Text = "Custom Marker Colors",
+        Tooltip = "Uses these two colors instead of each team's color",
+    })
+        :AddColorPicker("SpawnESP/MyColor", { Title = "My Team's Spawns", Default = Color3.fromRGB(34, 228, 255) })
+        :AddColorPicker("SpawnESP/EnemyColor", { Title = "Enemy Spawns", Default = Color3.fromRGB(255, 94, 110) })
 
     local OrbitalVisualsSection = VisualTab:AddRightGroupbox("Orbitals")
     OrbitalVisualsSection:AddCheckbox("OsVisualizer", { Text = "OS Visualizer", Tooltip = "Shows where your orbital shield will land, red when out of range" })
@@ -13738,6 +14768,93 @@ end,
         "LsThreatRingsTransparency",
         { Text = "Enemy LS Range Transparency", Default = 0.5, Min = 0, Max = 1, Rounding = 2 }
     )
+
+    local IridiumColorSection = ColorTab:AddLeftGroupbox("Iridium")
+    IridiumColorSection:AddCheckbox("IridiumColors/Tanks", {
+        Text = "Tank Color",
+        Tooltip = "Recolors the glowing iridium in every tank (and on players' backs) and the light it gives off",
+    }):AddColorPicker("IridiumColors/TankColor", { Title = "Tank Color", Default = Color3.fromRGB(0, 255, 255) })
+    IridiumColorSection:AddCheckbox("IridiumColors/Crystals", {
+        Text = "Crystal Color",
+        Tooltip = "Recolors the iridium crystals on the map and their light. The crystal itself is drawn a shade darker than its glow",
+    }):AddColorPicker("IridiumColors/CrystalColor", { Title = "Crystal Color", Default = Color3.fromRGB(0, 255, 255) })
+    IridiumColorSection:AddSlider("IridiumColors/GlowBrightness", {
+        Text = "Glow Brightness",
+        Default = 1,
+        Min = 0,
+        Max = 4,
+        Rounding = 2,
+        Suffix = "x",
+        Tooltip = "Scales the light recolored tanks and crystals give off. 1x is the game's own brightness",
+    })
+    IridiumColorSection:AddSlider("IridiumColors/CrystalShade", {
+        Text = "Crystal Body Shade",
+        Default = 0.6,
+        Min = 0.1,
+        Max = 1,
+        Rounding = 2,
+        Tooltip = "How bright a crystal's body is next to its glow. The game's are about 0.6",
+    })
+
+    local BeamColorSection = ColorTab:AddLeftGroupbox("Distributor Beams")
+    BeamColorSection:AddCheckbox("ChangeBeamColors", { Text = "Beam Color", Tooltip = "Recolors the iridium beams between distributors, fading from the first color to the second" })
+        :AddColorPicker("FirstBeamColor", { Title = "Beam Color (Start)", Default = Color3.fromRGB(0, 255, 255) })
+        :AddColorPicker("SecondBeamColor", { Title = "Beam Color (End)", Default = Color3.fromRGB(0, 255, 255) })
+
+    local BoreVisualsSection = ColorTab:AddRightGroupbox("Bores")
+    BoreVisualsSection:AddCheckbox("NeonBores", { Text = "Neon Bores" })
+    BoreVisualsSection:AddCheckbox("BoreBeamColorChange", {
+        Text = "Bore Beam Color",
+        Tooltip = "Recolors the beam on bores you placed; it still charges from the first color to the second",
+    })
+        :AddColorPicker("BoreBeamColor", { Title = "Bore Beam Color (Uncharged)", Default = Color3.fromRGB(0, 255, 255) })
+        :AddColorPicker("BoreBeamColorCharged", { Title = "Bore Beam Color (Charged)", Default = Color3.fromRGB(0, 0, 255) })
+    BoreVisualsSection:AddCheckbox("PreviewBeamColorChange", { Text = "Preview Beam Color" })
+        :AddColorPicker("PreviewBeamColorOne", { Title = "Preview Beam Color (Start)", Default = Color3.fromRGB(0, 255, 255) })
+        :AddColorPicker("PreviewBeamColorTwo", { Title = "Preview Beam Color (End)", Default = Color3.fromRGB(0, 255, 255) })
+    BoreVisualsSection:AddCheckbox("BoreFlareColors", {
+        Text = "Bore Flare Color",
+        Tooltip = "Recolors the flare particles and light on bores you placed; the light uses the first color",
+    })
+        :AddColorPicker("BoreFlareColorOne", { Title = "Bore Flare Color (Start)", Default = Color3.fromRGB(0, 0, 255) })
+        :AddColorPicker("BoreFlareColorTwo", { Title = "Bore Flare Color (End)", Default = Color3.fromRGB(0, 255, 255) })
+
+    local LightingSection = ColorTab:AddRightGroupbox("Lighting")
+    LightingSection:AddCheckbox("Lighting/Custom", {
+        Text = "Custom Lighting",
+        Tooltip = "Sets the shadow colors, sun brightness and exposure below. Off gives the game's own lighting back",
+    })
+        :AddColorPicker("Lighting/Ambient", { Title = "Shadow Color (Indoors)", Default = Color3.fromRGB(60, 60, 72) })
+        :AddColorPicker("Lighting/OutdoorAmbient", { Title = "Shadow Color (Outdoors)", Default = Color3.fromRGB(127, 127, 147) })
+    LightingSection:AddSlider("Lighting/Brightness", { Text = "Sun Brightness", Default = 2, Min = 0, Max = 10, Rounding = 1 })
+    LightingSection:AddSlider("Lighting/Exposure", { Text = "Exposure", Default = 0, Min = -3, Max = 3, Rounding = 1 })
+    LightingSection:AddDivider()
+    LightingSection:AddCheckbox("Lighting/ColorCorrection", {
+        Text = "Color Correction",
+        Tooltip = "A color filter over the whole screen, on top of the game's own",
+    }):AddColorPicker("Lighting/Tint", { Title = "Screen Tint", Default = Color3.fromRGB(255, 255, 255) })
+    LightingSection:AddSlider("Lighting/CCBrightness", { Text = "Brightness", Default = 0, Min = -0.5, Max = 0.5, Rounding = 2 })
+    LightingSection:AddSlider("Lighting/Contrast", { Text = "Contrast", Default = 0, Min = -1, Max = 1, Rounding = 2 })
+    LightingSection:AddSlider("Lighting/Saturation", { Text = "Saturation", Default = 0, Min = -1, Max = 1, Rounding = 2 })
+    LightingSection:AddDivider()
+    LightingSection:AddCheckbox("Lighting/Bloom", { Text = "Bloom", Tooltip = "Makes bright things like neon and iridium glow" })
+    LightingSection:AddSlider("Lighting/BloomIntensity", { Text = "Bloom Intensity", Default = 0.6, Min = 0, Max = 3, Rounding = 2 })
+    LightingSection:AddSlider("Lighting/BloomSize", { Text = "Bloom Size", Default = 24, Min = 0, Max = 56, Rounding = 0 })
+    LightingSection:AddSlider("Lighting/BloomThreshold", {
+        Text = "Bloom Threshold",
+        Default = 1,
+        Min = 0,
+        Max = 4,
+        Rounding = 2,
+        Tooltip = "How bright something has to be to glow. Lower makes more of the screen glow",
+    })
+    LightingSection:AddDivider()
+    LightingSection:AddCheckbox("Lighting/SkyTint", {
+        Text = "Haze Color",
+        Tooltip = "Colors the fog and the sky's haze. Has nothing to tint while No Fog is on",
+    })
+        :AddColorPicker("Lighting/HazeColor", { Title = "Haze Color", Default = Color3.fromRGB(0, 190, 200) })
+        :AddColorPicker("Lighting/DecayColor", { Title = "Haze Color (Far)", Default = Color3.fromRGB(0, 40, 145) })
 
     -- match stats: the board fills the Match tab, the score weights live in Settings
     local tracker = Tracker.new()
@@ -13767,6 +14884,42 @@ end,
             end
         end,
     })
+
+    local WorldSettings = SettingsTab:AddLeftGroupbox("World")
+    WorldSettings:AddCheckbox("World/NoFog", {
+        Text = "No Fog",
+        Tooltip = "Clears the haze so you can see across the map. Turning it off brings the game's fog back",
+    })
+    WorldSettings:AddCheckbox("World/Daytime", {
+        Text = "Daytime",
+        Tooltip = "Holds the clock at the time below. Turning it off gives the game its own time back",
+    })
+    WorldSettings:AddSlider("World/ClockTime", {
+        Text = "Time of Day",
+        Default = 14,
+        Min = 0,
+        Max = 24,
+        Rounding = 1,
+        Suffix = "h",
+    })
+
+    local ShortcutSettings = SettingsTab:AddLeftGroupbox("Shortcuts")
+    ShortcutSettings:AddLabel("Turn everything off"):AddKeyPicker("TurnEverythingOffKey", {
+        Text = "Turn everything off",
+        Mode = "Press",
+        Callback = function()
+            turnOffCall:Fire()
+        end,
+    })
+    ShortcutSettings:AddLabel([[<font color="#707e96">every feature's own key sits beside its switch</font>]])
+
+    for _, name in KEYBIND_TOGGLES do
+        Toggles[name]:AddKeyPicker(string.format('Keybind/%s', tostring(name)), {
+            Text = Toggles[name].Text,
+            Mode = "Toggle",
+            SyncToggleState = true,
+        })
+    end
 
     local WeightSettings = SettingsTab:AddRightGroupbox("Score Weights")
     WeightSettings:AddLabel([[<font color="#707e96">points per stat in a player's score</font>]])
@@ -13826,6 +14979,9 @@ end,
         local fastplacement = dote.X().new()
         local gunmods = dote.Y().new()
         local rocketaim = dote.Z().new()
+        local spawnesp = dote._().new()
+        local iridiumcolors = dote.ab().new()
+        local world = dote.ac().new()
 
         for name, value in
             {
@@ -13874,6 +15030,9 @@ end,
         fastplacement:start()
         gunmods:start()
         rocketaim:start()
+        spawnesp:start()
+        iridiumcolors:start()
+        world:start()
 
         -- SetText rebuilds the rich text label, so only call it when the spawn changes
         local shownSpawn = {}
@@ -13891,6 +15050,7 @@ end,
             otherarty:update()
             lsthreat:update()
             rocketaim:update()
+            spawnesp:update()
 
             if container.selectedSpawn ~= shownSpawn then
                 shownSpawn = container.selectedSpawn
@@ -13923,6 +15083,64 @@ and{(string.format("Selecting <font color='#22e4ff'><b>S%s</b></font>", tostring
                 if not Toggles.FallDamage.Value or nofall.SetFallDamage(false) then
                     return
                 end
+            end
+        end)
+    end
+end
+
+-- one click turns off every feature that's on, and each one puts the game back as it was. the button
+-- then offers to turn the same ones back on, until you turn something on yourself
+do
+    local OFF_TEXT = "Turn everything off"
+    local turnedOff
+    local restoring = false
+    local button
+local forget=function()        
+
+turnedOff = nil
+        button:SetText(OFF_TEXT)
+end local turnEverythingOff=function()        
+
+
+if turnedOff then
+            restoring = true
+            for _, toggle in turnedOff do
+                toggle:SetValue(true)
+            end
+            restoring = false
+            window:Notify(string.format('Turned %s features back on', tostring(#turnedOff)))
+            forget()
+            return
+        end
+
+        local switched = {}
+        for _, toggle in Toggles do
+            if toggle.Value and not toggle._info.NoSave then
+                toggle:SetValue(false)
+                table.insert(switched, toggle)
+            end
+        end
+        if #switched == 0 then
+            window:Notify("Nothing is on")
+            return
+        end
+
+        turnedOff = switched
+        button:SetText("Turn back on", "success")
+        window:Notify(string.format('Turned off %s features. Use it again to turn them back on', tostring(#switched)))
+end
+    
+button = window:AddSidebarButton({
+        Text = OFF_TEXT,
+        Tooltip = "Turns every feature off. Your colors, sliders and keybinds stay as they are",
+        Func = turnEverythingOff,
+    })
+    turnOffCall:Connect(turnEverythingOff)
+
+    for _, toggle in Toggles do
+        toggle:OnChanged(function(enabled)
+            if enabled and turnedOff and not restoring then
+                forget()
             end
         end)
     end
